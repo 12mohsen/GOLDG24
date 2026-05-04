@@ -319,6 +319,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
   <div class="topbar">
     <div class="topbar-logo">
       <span>🏅</span> محفظة المعادن
+      <span style="font-size:12px;color:var(--text);margin-right:15px;padding-right:15px;border-right:1px solid var(--border2);" id="usernameDisplay">--</span>
     </div>
     <div class="price-ticker" id="priceTicker">
       <div class="ticker-item">
@@ -611,6 +612,22 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
   </div>
 </div>
 
+<div class="modal-overlay" id="logoutModal">
+  <div class="modal">
+    <h2>تسجيل الخروج <button class="modal-close" onclick="closeLogoutModal()">✕</button></h2>
+    <div style="padding:20px 0;">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:20px;">
+        <input type="checkbox" id="saveDataCheckbox" style="width:20px;height:20px;cursor:pointer;" checked>
+        <span style="font-size:14px;color:var(--text);">حفظ البيانات (العمليات، الأسعار، الإعدادات)</span>
+      </label>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button onclick="closeLogoutModal()" class="btn btn-outline">إلغاء</button>
+        <button onclick="confirmLogout()" class="btn btn-gold">تسجيل الخروج</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════
 //  STATE & STORAGE
@@ -724,11 +741,22 @@ function showErr(el, msg) {
 }
 
 function logout() {
-  if (!confirm('هل تريد تسجيل الخروج؟')) return;
-  saveState();
+  document.getElementById('logoutModal').classList.add('open');
+}
+
+function closeLogoutModal() {
+  document.getElementById('logoutModal').classList.remove('open');
+}
+
+function confirmLogout() {
+  const saveData = document.getElementById('saveDataCheckbox').checked;
+  if (saveData) {
+    saveState();
+  }
   state.currentUser = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('authScreen').style.display = 'flex';
+  closeLogoutModal();
 }
 
 function enterApp() {
@@ -736,6 +764,7 @@ function enterApp() {
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
+  document.getElementById('usernameDisplay').textContent = state.currentUser;
   applyTheme();
   document.getElementById('exchangeRate').value = state.exchangeRate;
   document.getElementById('storageFees').value = state.storageFees;
@@ -2026,6 +2055,16 @@ document.getElementById('operationModal').addEventListener('click', function(e) 
 
 // Prevent closing when clicking inside the modal content
 document.getElementById('operationModal').querySelector('.modal').addEventListener('click', function(e) {
+  e.stopPropagation();
+});
+
+// Logout modal close on outside click
+document.getElementById('logoutModal').addEventListener('click', function(e) {
+  if (e.target === this) closeLogoutModal();
+});
+
+// Prevent closing when clicking inside the logout modal content
+document.getElementById('logoutModal').querySelector('.modal').addEventListener('click', function(e) {
   e.stopPropagation();
 });
 
