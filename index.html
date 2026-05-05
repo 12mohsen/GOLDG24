@@ -372,7 +372,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
           <div class="stat-sub" id="sCapitalSub">0 USD</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">رسوم التخزين</div>
+          <div class="stat-label">رسوم التخزين + الخدمة</div>
           <div class="stat-val num" id="sStorageFees">0 SAR</div>
           <div class="stat-sub">مخصومة من صافي القيمة</div>
         </div>
@@ -479,8 +479,14 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
               </select>
             </div>
             <div class="inp-group">
-              <label>قيمة الفرق (ريال)</label>
+              <label>فرق الذهب (ريال/جم)</label>
               <input type="number" id="spreadValue" value="13" min="0" step="0.01" oninput="saveSpreadSettings();recalcAll();">
+            </div>
+          </div>
+          <div class="row2" style="margin-top:8px;">
+            <div class="inp-group">
+              <label>فرق الفضة (ريال/جم)</label>
+              <input type="number" id="spreadSilver" value="0.50" min="0" step="0.01" oninput="saveSpreadSettings();recalcAll();">
             </div>
           </div>
           <div style="margin-top:10px;background:var(--bg3);border-radius:10px;padding:10px;font-size:12px;color:var(--text2);">
@@ -498,6 +504,11 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             <label>رسوم التخزين (SAR)</label>
             <input type="number" id="storageFees" value="0" min="0" step="0.01" oninput="saveStorageFees();recalcAll();">
             <button class="btn btn-outline" onclick="suggestStorageFees()" style="margin-top:8px;padding:8px;font-size:12px;">اقتراح الرسوم: 10 ريال لكل 100 جم شهرياً</button>
+          </div>
+          <div class="inp-group" style="margin-top:10px;">
+            <label>رسوم الخدمة البنكية (SAR / 100 جم)</label>
+            <input type="number" id="serviceFeeRate" value="10" min="0" step="0.01" oninput="saveServiceFeeRate();" placeholder="10">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">تُخصم تلقائياً من صافي الربح لكل عملية</div>
           </div>
         </div>
       </div>
@@ -690,7 +701,9 @@ let state = {
   chartTF: '60',
   spreadBank: 'alahli',
   spreadValue: 13,
-  storageFees: 0
+  spreadSilver: 0.50,
+  storageFees: 0,
+  serviceFeeRate: 10  // ريال لكل 100 جرام
 };
 
 const TROY_OZ_TO_GRAM = 31.1035;
@@ -711,7 +724,9 @@ function saveState() {
     darkMode: state.darkMode,
     spreadBank: state.spreadBank,
     spreadValue: state.spreadValue,
-    storageFees: state.storageFees
+    spreadSilver: state.spreadSilver,
+    storageFees: state.storageFees,
+    serviceFeeRate: state.serviceFeeRate
   }));
 
   // Also save to Supabase in background
@@ -729,7 +744,9 @@ function loadState() {
     state.darkMode = d.darkMode !== undefined ? d.darkMode : true;
     state.spreadBank = d.spreadBank || 'alahli';
     state.spreadValue = d.spreadValue !== undefined ? d.spreadValue : 13;
+    state.spreadSilver = d.spreadSilver !== undefined ? d.spreadSilver : 0.50;
     state.storageFees = d.storageFees !== undefined ? d.storageFees : 0;
+    state.serviceFeeRate = d.serviceFeeRate !== undefined ? d.serviceFeeRate : 10;
   }
 
   // Also try to load from Supabase
@@ -748,6 +765,7 @@ async function saveStateSupabase() {
       dark_mode: state.darkMode,
       spread_bank: state.spreadBank,
       spread_value: state.spreadValue,
+      spread_silver: state.spreadSilver,
       storage_fees: state.storageFees
     });
 
@@ -787,6 +805,7 @@ async function loadStateSupabase() {
       state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
       state.spreadBank = s.spread_bank || 'alahli';
       state.spreadValue = s.spread_value !== undefined ? s.spread_value : 13;
+      state.spreadSilver = s.spread_silver !== undefined ? s.spread_silver : 0.50;
       state.storageFees = s.storage_fees !== undefined ? s.storage_fees : 0;
     }
 
@@ -881,6 +900,15 @@ function confirmLogout() {
   const saveData = document.getElementById('saveDataCheckbox').checked;
   if (saveData) {
     saveState();
+    // حفظ اسم المستخدم وكلمة المرور في حقول تسجيل الدخول
+    const user = state.currentUser;
+    const pass = document.getElementById('loginPass').value;
+    if (user) localStorage.setItem('savedUsername', user);
+    if (pass) localStorage.setItem('savedPassword', pass);
+  } else {
+    // مسح البيانات المحفوظة
+    localStorage.removeItem('savedUsername');
+    localStorage.removeItem('savedPassword');
   }
   state.currentUser = null;
   document.getElementById('app').style.display = 'none';
@@ -897,6 +925,7 @@ function enterApp() {
   applyTheme();
   document.getElementById('exchangeRate').value = state.exchangeRate;
   document.getElementById('storageFees').value = state.storageFees;
+  document.getElementById('serviceFeeRate').value = state.serviceFeeRate !== undefined ? state.serviceFeeRate : 10;
   initSpreadSettings();
   fetchPrices();
   renderHoldings();
@@ -1102,20 +1131,25 @@ function getGlobalPriceSAR(metal) {
   return usd ? usd * state.exchangeRate : 0;
 }
 
+function getSpread(metal) {
+  // spread مستقل لكل معدن — الفضة لها فارق سعري أصغر بكثير من الذهب
+  return metal === 'gold' ? (state.spreadValue || 0) : (state.spreadSilver || 0);
+}
+
 function getLocalBuyPriceSAR(metal) {
   const globalPrice = getGlobalPriceSAR(metal);
-  return globalPrice ? globalPrice + state.spreadValue : 0;
+  return globalPrice ? globalPrice + getSpread(metal) : 0;
 }
 
 function getLocalSellPriceSAR(metal) {
   const globalPrice = getGlobalPriceSAR(metal);
-  if (globalPrice) return Math.max(globalPrice - state.spreadValue, 0);
+  if (globalPrice) return Math.max(globalPrice - getSpread(metal), 0);
 
   // Fallback to last successful price
   const lastPriceUSD = metal === 'gold' ? state.lastGoldPriceUSD : state.lastSilverPriceUSD;
   if (lastPriceUSD) {
     const lastPriceSAR = lastPriceUSD * state.exchangeRate;
-    return Math.max(lastPriceSAR - state.spreadValue, 0);
+    return Math.max(lastPriceSAR - getSpread(metal), 0);
   }
 
   return 0;
@@ -1124,6 +1158,7 @@ function getLocalSellPriceSAR(metal) {
 function initSpreadSettings() {
   document.getElementById('spreadBank').value = state.spreadBank;
   document.getElementById('spreadValue').value = state.spreadValue;
+  document.getElementById('spreadSilver').value = state.spreadSilver !== undefined ? state.spreadSilver : 0.50;
   updateSpreadDisplay();
 }
 
@@ -1133,6 +1168,7 @@ function selectSpreadBank() {
   if (BANK_SPREADS[bank] && bank !== 'manual') {
     state.spreadValue = BANK_SPREADS[bank].spread;
     document.getElementById('spreadValue').value = state.spreadValue;
+  document.getElementById('spreadSilver').value = state.spreadSilver !== undefined ? state.spreadSilver : 0.50;
   }
   saveState();
   updatePriceDisplay(state.goldPriceUSD, state.silverPriceUSD);
@@ -1142,6 +1178,7 @@ function selectSpreadBank() {
 function saveSpreadSettings() {
   state.spreadBank = document.getElementById('spreadBank').value;
   state.spreadValue = parseFloat(document.getElementById('spreadValue').value) || 0;
+  state.spreadSilver = parseFloat(document.getElementById('spreadSilver').value) || 0;
   saveState();
   updateSpreadDisplay();
 }
@@ -1149,6 +1186,13 @@ function saveSpreadSettings() {
 function saveStorageFees() {
   state.storageFees = parseFloat(document.getElementById('storageFees').value) || 0;
   saveState();
+}
+
+function saveServiceFeeRate() {
+  state.serviceFeeRate = parseFloat(document.getElementById('serviceFeeRate').value);
+  if (isNaN(state.serviceFeeRate) || state.serviceFeeRate < 0) state.serviceFeeRate = 0;
+  saveState();
+  recalcAll();
 }
 
 function suggestStorageFees() {
@@ -1332,10 +1376,13 @@ function openOperationModal(id) {
 
   const avgPrice = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
   const storageFees = state.storageFees || 0;
+  // ✅ سعر البيع الفعلي (بعد خصم spread البنك)
   const marketPrice = getLocalSellPriceSAR(metal);
   const currentHoldingGrams = totalBuyGrams - totalSellGrams;
   const currentValue = currentHoldingGrams * (marketPrice || 0);
-  const netPnl = currentValue - totalBuyCost + totalSellRevenue - storageFees;
+  // ✅ رسوم الخدمة على هذه العملية
+  const opServiceFees = calcServiceFees(currentHoldingGrams);
+  const netPnl = currentValue - totalBuyCost + totalSellRevenue - storageFees - opServiceFees;
   const netPnlColor = netPnl >= 0 ? 'var(--green)' : 'var(--red)';
 
   document.getElementById('operationDetails').innerHTML = `
@@ -1390,15 +1437,19 @@ function openOperationModal(id) {
         </div>
       </div>
 
-      ${currentValue > 0 || storageFees > 0 ? `
+      ${currentValue > 0 || storageFees > 0 || opServiceFees > 0 ? `
       <div style="background:rgba(212,175,55,0.07);border:1px solid var(--border2);border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
         <div style="display:flex;flex-direction:column;gap:2px;">
-          <span style="font-size:11px;color:var(--text3);">القيمة الحالية</span>
+          <span style="font-size:11px;color:var(--text3);">القيمة الحالية (سعر البيع)</span>
           <span class="num" style="font-size:14px;font-weight:700;color:var(--text);">${fmt(currentValue, 0)} ريال</span>
         </div>
         ${storageFees > 0 ? `<div style="display:flex;flex-direction:column;gap:2px;">
           <span style="font-size:11px;color:var(--text3);">رسوم التخزين</span>
           <span class="num" style="font-size:14px;font-weight:700;color:#F59E0B;">-${fmt(storageFees, 0)} ريال</span>
+        </div>` : ''}
+        ${opServiceFees > 0 ? `<div style="display:flex;flex-direction:column;gap:2px;">
+          <span style="font-size:11px;color:var(--text3);">رسوم الخدمة البنكية</span>
+          <span class="num" style="font-size:14px;font-weight:700;color:#F59E0B;">-${fmt(opServiceFees, 0)} ريال</span>
         </div>` : ''}
         <div style="display:flex;flex-direction:column;gap:2px;text-align:left;">
           <span style="font-size:11px;color:var(--text3);">صافي الربح / الخسارة</span>
@@ -1539,44 +1590,67 @@ function renderHoldings() {
   const renderMetalBox = (ops, metal, metalName, metalColor) => {
     if (!ops.length) return '';
 
-    let totalBuyGrams = 0, totalBuyCost = 0;
-    let totalSellGrams = 0, totalSellRevenue = 0;
-
-    // Use current market prices directly (without spread deduction)
-    const priceUSD = metal === 'gold' ? state.goldPriceUSD : state.silverPriceUSD;
-    let currentMarketPrice = priceUSD ? priceUSD * state.exchangeRate : 0;
-
-    // Fallback: use last saved price if current is 0
-    if (currentMarketPrice === 0) {
+    // ✅ سعر البيع الفعلي (سعر السوق − spread البنك) — نفس القيمة المستخدمة في recalcAll
+    let currentSellPrice = getLocalSellPriceSAR(metal);
+    if (currentSellPrice === 0) {
       const lastPriceUSD = metal === 'gold' ? state.lastGoldPriceUSD : state.lastSilverPriceUSD;
-      if (lastPriceUSD) currentMarketPrice = lastPriceUSD * state.exchangeRate;
+      if (lastPriceUSD) currentSellPrice = Math.max(lastPriceUSD * state.exchangeRate - state.spreadValue, 0);
     }
 
+    // ── مرحلة أولى: احسب الإجماليات الكاملة أولاً ──
+    let totalBuyGrams = 0, totalBuyCost = 0;
+    let totalSellGrams = 0, totalSellRevenue = 0;
+    ops.forEach(op => {
+      const cost = op.grams * op.buyPrice;
+      if (op.type === 'buy') { totalBuyGrams += op.grams; totalBuyCost += cost; }
+      else                   { totalSellGrams += op.grams; totalSellRevenue += cost; }
+    });
+
+    const holdingGrams = totalBuyGrams - totalSellGrams;
+    const avgPrice     = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
+    const currentVal   = holdingGrams * currentSellPrice;
+    const serviceFees  = calcServiceFees(holdingGrams);
+    const storageFees  = state.storageFees || 0;
+
+    // ✅ المجموع الكلي = القيمة الحالية − تكلفة الشراء + عائد البيع − رسوم التخزين − رسوم الخدمة
+    const netPnl = currentVal - totalBuyCost + totalSellRevenue - storageFees - serviceFees;
+
+    // ── مرحلة ثانية: أنشئ صفوف الجدول — كل صف يعرض ربح عمليته بالمنطق ذاته ──
+    // لكل عملية: ربحها = (سعر البيع − سعر شرائها) × كميتها
+    // هذا يضمن أن مجموع أعمدة "المكسب" = netPnl (بدون الرسوم التي تُخصم مرة واحدة في الإجمالي)
+    let runBuyGrams = 0, runBuyCost = 0;
+    let runSellGrams = 0, runSellRevenue = 0;
+    let rowPnlSum = 0;
+
     const rows = ops.map(op => {
-      const isBuy = op.type === 'buy';
+      const isBuy   = op.type === 'buy';
       const typeLabel = isBuy ? '🟢 شراء' : '🔴 بيع';
       const typeClass = isBuy ? 'buy' : 'sell';
       const cost = op.grams * op.buyPrice;
 
-      if (isBuy) {
-        totalBuyGrams += op.grams;
-        totalBuyCost += cost;
-      } else {
-        totalSellGrams += op.grams;
-        totalSellRevenue += cost;
-      }
+      if (isBuy) { runBuyGrams += op.grams; runBuyCost += cost; }
+      else       { runSellGrams += op.grams; runSellRevenue += cost; }
 
-      const avgPrice = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
-      const holdingGrams = totalBuyGrams - totalSellGrams;
-      const pnl = (currentMarketPrice - avgPrice) * holdingGrams;
+      const runAvg     = runBuyGrams > 0 ? runBuyCost / runBuyGrams : 0;
+
+      // ربح هذه العملية = (سعر البيع الحالي − متوسط التكلفة) × كميتها
+      // للعمليات النوع بيع: الربح = عائد البيع − تكلفة تلك الكمية بالمتوسط
+      let opPnl;
+      if (isBuy) {
+        opPnl = (currentSellPrice - op.buyPrice) * op.grams;
+      } else {
+        // عملية بيع: ربحها = سعر البيع الفعلي − متوسط شراء وقتها × كميتها
+        opPnl = (op.buyPrice - runAvg) * op.grams;
+      }
+      rowPnlSum += opPnl;
 
       return `<tr class="fade-in" style="background:${isBuy?'rgba(212,175,55,0.02)':'rgba(239,68,68,0.02)'};">
         <td style="text-align:right;"><span class="badge badge-${typeClass}">${typeLabel}</span></td>
         <td class="num" style="text-align:right;">${fmt(op.grams,3)}</td>
         <td class="num" style="text-align:right;">${fmt(op.buyPrice,2)}</td>
         <td class="num" style="color:${metalColor};text-align:right;">${fmt(cost,0)}</td>
-        <td class="num" style="color:${metalColor};text-align:right;">${fmt(avgPrice,2)}</td>
-        <td class="num ${pnl>=0?'pos':'neg'}" style="text-align:right;">${pnl>=0?'+':''}${fmt(pnl,0)}</td>
+        <td class="num" style="color:${metalColor};text-align:right;">${fmt(runAvg,2)}</td>
+        <td class="num ${opPnl>=0?'pos':'neg'}" style="text-align:right;">${opPnl>=0?'+':''}${fmt(opPnl,0)}</td>
         <td style="text-align:center;">
           <button class="del-btn" onclick="enableEditOperation(${op.id}, event)" style="margin-left:4px;">✏️</button>
           <button class="del-btn" onclick="deleteOp(${op.id})">🗑️</button>
@@ -1584,10 +1658,17 @@ function renderHoldings() {
       </tr>`;
     }).join('');
 
-    const holdingGrams = totalBuyGrams - totalSellGrams;
-    const avgPrice = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
-    const currentVal = holdingGrams * currentMarketPrice;
-    const netPnl = currentVal - totalBuyCost + totalSellRevenue;
+    // صف إجمالي الجدول (يطابق netPnl بالضبط)
+    const feesNote = (storageFees + serviceFees) > 0
+      ? `<span style="font-size:10px;color:#F59E0B;"> (بعد رسوم ${fmt(storageFees+serviceFees,0)} ريال)</span>`
+      : '';
+
+    const sumRow = `<tr style="border-top:2px solid var(--border);background:rgba(212,175,55,0.04);">
+      <td colspan="5" style="padding:8px 10px;text-align:right;font-size:12px;color:var(--text3);font-weight:700;">الإجمالي الصافي${feesNote}</td>
+      <td class="num ${netPnl>=0?'pos':'neg'}" style="text-align:right;font-weight:900;font-size:14px;">${netPnl>=0?'+':''}${fmt(netPnl,0)}</td>
+      <td></td>
+    </tr>`;
+
 
     return `
       <tr><td colspan="7" style="padding:0;">
@@ -1596,7 +1677,7 @@ function renderHoldings() {
             <span style="font-size:24px;">${metal === 'gold' ? '🟡' : '⚪'}</span>
             <div style="flex:1;">
               <div style="font-size:16px;font-weight:700;color:${metalColor};">${metalName}</div>
-              <div style="font-size:12px;color:${metal === 'gold' ? 'var(--gold)' : 'var(--text)'};">${ops.length} عملية | الكمية المحتفظ بها: ${fmt(holdingGrams,3)} جم | سعر السوق: ${fmt(currentMarketPrice,2)} ريال/جم</div>
+              <div style="font-size:12px;color:${metal === 'gold' ? 'var(--gold)' : 'var(--text)'};">${ops.length} عملية | الكمية المحتفظ بها: ${fmt(holdingGrams,3)} جم | سعر البيع الفعلي: ${fmt(currentSellPrice,2)} ريال/جم</div>
             </div>
             <div style="text-align:left;">
               <div style="font-size:11px;color:var(--text3);">إجمالي رأس المال</div>
@@ -1619,12 +1700,13 @@ function renderHoldings() {
                 <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">سعر/جم</th>
                 <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">التكلفة</th>
                 <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المتوسط</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المكسب</th>
+                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المكسب/الخسارة</th>
                 <th style="padding:8px;text-align:center;font-size:11px;color:var(--text3);"></th>
               </tr>
             </thead>
             <tbody>
               ${rows}
+              ${sumRow}
             </tbody>
           </table>
         </div>
@@ -1641,65 +1723,96 @@ function renderHoldings() {
 // ═══════════════════════════════════════════
 //  CALCULATIONS
 // ═══════════════════════════════════════════
+// ─── حساب رسوم الخدمة لكمية معينة بالجرام ───
+// المعدل الافتراضي: 10 ريال لكل 100 جرام (قابل للتغيير)
+function calcServiceFees(grams) {
+  const feeRate = state.serviceFeeRate !== undefined ? state.serviceFeeRate : 10; // ريال / 100 جرام
+  return (grams * feeRate) / 100;
+}
+
 function recalcAll() {
   const er = state.exchangeRate;
-  const gPriceSAR = state.goldPriceUSD ? state.goldPriceUSD * er : 0;
-  const sPriceSAR = state.silverPriceUSD ? state.silverPriceUSD * er : 0;
 
-  let goldBuyGrams = 0, goldSellGrams = 0;
-  let silverBuyGrams = 0, silverSellGrams = 0;
-  let goldBuyCost = 0, silverBuyCost = 0;
-  let goldSellRevenue = 0, silverSellRevenue = 0;
+  // ✅ سعر البيع الفعلي (سعر السوق − spread) — نفس ما تستخدمه الصفوف في الجدول
+  const goldSellPriceSAR   = getLocalSellPriceSAR('gold');
+  const silverSellPriceSAR = getLocalSellPriceSAR('silver');
 
-  state.operations.forEach(op => {
+  // ── احسب PnL بنفس منطق الصفوف: (سعر البيع − سعر الشراء) × الكمية لكل عملية ──
+  let totalPnlBeforeFees = 0;
+  let goldBuyGrams = 0, goldBuyCost = 0, goldSellGrams = 0, goldSellRevenue = 0;
+  let silverBuyGrams = 0, silverBuyCost = 0, silverSellGrams = 0, silverSellRevenue = 0;
+
+  // نحتاج الحساب التراكمي للمتوسط لكل معدن (نفس منطق renderMetalBox)
+  let gRunBuyGrams = 0, gRunBuyCost = 0, gRunSellGrams = 0;
+  let sRunBuyGrams = 0, sRunBuyCost = 0, sRunSellGrams = 0;
+
+  // افصل العمليات لكل معدن بالترتيب
+  const goldOps   = state.operations.filter(o => o.metal === 'gold');
+  const silverOps = state.operations.filter(o => o.metal === 'silver');
+
+  goldOps.forEach(op => {
     const cost = op.grams * op.buyPrice;
     if (op.type === 'buy') {
-      if (op.metal === 'gold') {
-        goldBuyGrams += op.grams;
-        goldBuyCost += cost;
-      } else {
-        silverBuyGrams += op.grams;
-        silverBuyCost += cost;
-      }
+      gRunBuyGrams += op.grams; gRunBuyCost += cost;
+      goldBuyGrams += op.grams; goldBuyCost += cost;
+      totalPnlBeforeFees += (goldSellPriceSAR - op.buyPrice) * op.grams;
     } else {
-      if (op.metal === 'gold') {
-        goldSellGrams += op.grams;
-        goldSellRevenue += cost;
-      } else {
-        silverSellGrams += op.grams;
-        silverSellRevenue += cost;
-      }
+      const avg = gRunBuyGrams > 0 ? gRunBuyCost / gRunBuyGrams : 0;
+      gRunSellGrams += op.grams;
+      goldSellGrams += op.grams; goldSellRevenue += cost;
+      totalPnlBeforeFees += (op.buyPrice - avg) * op.grams;
     }
   });
 
-  const goldHoldingGrams = goldBuyGrams - goldSellGrams;
-  const silverHoldingGrams = silverBuyGrams - silverSellGrams;
-  const goldVal = goldHoldingGrams * gPriceSAR;
-  const silverVal = silverHoldingGrams * sPriceSAR;
+  silverOps.forEach(op => {
+    const cost = op.grams * op.buyPrice;
+    if (op.type === 'buy') {
+      sRunBuyGrams += op.grams; sRunBuyCost += cost;
+      silverBuyGrams += op.grams; silverBuyCost += cost;
+      totalPnlBeforeFees += (silverSellPriceSAR - op.buyPrice) * op.grams;
+    } else {
+      const avg = sRunBuyGrams > 0 ? sRunBuyCost / sRunBuyGrams : 0;
+      sRunSellGrams += op.grams;
+      silverSellGrams += op.grams; silverSellRevenue += cost;
+      totalPnlBeforeFees += (op.buyPrice - avg) * op.grams;
+    }
+  });
 
-  const totalBuyCost = goldBuyCost + silverBuyCost;
-  const totalSellRevenue = goldSellRevenue + silverSellRevenue;
-  const storageFees = state.storageFees || 0;
-  const currentSellValue = goldVal + silverVal;
-  const grossProfit = currentSellValue - totalBuyCost + totalSellRevenue;
-  const pnl = currentSellValue - totalBuyCost + totalSellRevenue - storageFees;
+  const goldHoldingGrams   = goldBuyGrams - goldSellGrams;
+  const silverHoldingGrams = silverBuyGrams - silverSellGrams;
+
+  // القيمة الحالية (للعرض في البطاقات)
+  const goldVal   = goldHoldingGrams   * goldSellPriceSAR;
+  const silverVal = silverHoldingGrams * silverSellPriceSAR;
+
+  const totalBuyCost     = goldBuyCost + silverBuyCost;
+  const storageFees      = state.storageFees || 0;
+  const totalHoldingGrams = goldHoldingGrams + silverHoldingGrams;
+  const serviceFees = calcServiceFees(totalHoldingGrams);
+
+  // ✅ الـ PnL النهائي = مجموع ربح كل عملية (نفس الجدول) − الرسوم
+  const pnl    = totalPnlBeforeFees - storageFees - serviceFees;
   const pnlPct = totalBuyCost > 0 ? (pnl / totalBuyCost * 100) : 0;
-  const feesImpactHigh = grossProfit > 0 && storageFees >= grossProfit * 0.25;
+  const totalFees = storageFees + serviceFees;
+  const feesImpactHigh = totalPnlBeforeFees > 0 && totalFees >= totalPnlBeforeFees * 0.25;
 
   document.getElementById('sGoldGrams').textContent = fmt(goldHoldingGrams, 2);
-  document.getElementById('sGoldVal').textContent = fmt(goldVal, 0) + ' SAR';
+  document.getElementById('sGoldVal').textContent   = fmt(goldVal, 0) + ' SAR';
   document.getElementById('sSilverGrams').textContent = fmt(silverHoldingGrams, 2);
-  document.getElementById('sSilverVal').textContent = fmt(silverVal, 0) + ' SAR';
-  document.getElementById('sStorageFees').textContent = '-' + fmt(storageFees, 0) + ' SAR';
+  document.getElementById('sSilverVal').textContent   = fmt(silverVal, 0) + ' SAR';
+  document.getElementById('sStorageFees').textContent = '-' + fmt(storageFees + serviceFees, 0) + ' SAR';
 
   const pnlEl = document.getElementById('sPnL');
   pnlEl.textContent = (pnl >= 0 ? '+' : '') + fmt(pnl, 0) + ' SAR';
-  pnlEl.className = 'stat-val num ' + (pnl >= 0 ? 'pos' : 'neg');
-  const profitCard = document.getElementById('profitCard');
-  profitCard.className = 'stat-card profit ' + (pnl >= 0 ? 'pos' : 'neg');
-  document.getElementById('sPnLSub').innerHTML = `${pnl >= 0 ? '+' : ''}${fmt(pnl / er, 0)} USD (${pnl>=0?'+':''}${fmt(pnlPct,1)}%) ${feesImpactHigh ? `<span style="color:#F59E0B;"> | رسوم التخزين: -${fmt(storageFees,0)} SAR</span>` : ''}`;
+  pnlEl.className   = 'stat-val num ' + (pnl >= 0 ? 'pos' : 'neg');
+  document.getElementById('profitCard').className = 'stat-card profit ' + (pnl >= 0 ? 'pos' : 'neg');
 
-  document.getElementById('sCapital').textContent = fmt(totalBuyCost, 0) + ' SAR';
+  let subDetails = `${pnl >= 0 ? '+' : ''}${fmt(pnl / er, 0)} USD (${pnl>=0?'+':''}${fmt(pnlPct,1)}%)`;
+  if (serviceFees > 0) subDetails += ` <span style="color:#F59E0B;"> | رسوم خدمة: -${fmt(serviceFees,0)} SAR</span>`;
+  if (feesImpactHigh && storageFees > 0) subDetails += ` <span style="color:#F59E0B;"> | تخزين: -${fmt(storageFees,0)} SAR</span>`;
+  document.getElementById('sPnLSub').innerHTML = subDetails;
+
+  document.getElementById('sCapital').textContent    = fmt(totalBuyCost, 0) + ' SAR';
   document.getElementById('sCapitalSub').textContent = fmt(totalBuyCost / er, 0) + ' USD';
 
   renderHoldings();
@@ -2213,6 +2326,12 @@ if (session) {
   loadState();
   enterApp();
 }
+
+// Restore saved username and password from localStorage
+const savedUsername = localStorage.getItem('savedUsername');
+const savedPassword = localStorage.getItem('savedPassword');
+if (savedUsername) document.getElementById('loginUser').value = savedUsername;
+if (savedPassword) document.getElementById('loginPass').value = savedPassword;
 </script>
 </body>
 </html>
