@@ -254,6 +254,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 .empty-state{text-align:center;padding:30px;color:var(--text3);font-size:13px;}
 .empty-state .icon{font-size:36px;margin-bottom:8px;}
 </style>
+<!-- Supabase REST API (no library needed) -->
 </head>
 <body>
 
@@ -630,6 +631,52 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 
 <script>
 // ═══════════════════════════════════════════
+//  SUPABASE REST API (no library needed)
+// ═══════════════════════════════════════════
+const SUPABASE_URL = 'https://tvbuvwjkojhqcxhyehfs.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR2YnV2d2prb2pocWN4aHllaGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MDE4MTUsImV4cCI6MjA5MjI3NzgxNX0.egwryYwKu_Bicl_koaYXaKGBoxz42c6k4VkMD9aZSWQ';
+const SB_HEADERS = {
+  'apikey': SUPABASE_KEY,
+  'Authorization': 'Bearer ' + SUPABASE_KEY,
+  'Content-Type': 'application/json',
+  'Prefer': 'return=minimal'
+};
+
+async function sbGet(table, query) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+  });
+  if (!res.ok) throw new Error(`GET ${table}: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function sbPost(table, data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST', headers: {...SB_HEADERS, 'Prefer': 'return=representation'}, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(`POST ${table}: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function sbUpsert(table, data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {...SB_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal'},
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(`UPSERT ${table}: ${res.status} ${await res.text()}`);
+}
+
+async function sbDelete(table, query) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: 'DELETE', headers: SB_HEADERS
+  });
+  if (!res.ok) throw new Error(`DELETE ${table}: ${res.status} ${await res.text()}`);
+}
+
+console.log('✅ Supabase REST API ready');
+
+// ═══════════════════════════════════════════
 //  STATE & STORAGE
 // ═══════════════════════════════════════════
 let state = {
@@ -666,6 +713,9 @@ function saveState() {
     spreadValue: state.spreadValue,
     storageFees: state.storageFees
   }));
+
+  // Also save to Supabase in background
+  if (SUPABASE_KEY) saveStateSupabase();
 }
 
 function loadState() {
@@ -680,6 +730,85 @@ function loadState() {
     state.spreadBank = d.spreadBank || 'alahli';
     state.spreadValue = d.spreadValue !== undefined ? d.spreadValue : 13;
     state.storageFees = d.storageFees !== undefined ? d.storageFees : 0;
+  }
+
+  // Also try to load from Supabase
+  if (SUPABASE_KEY) loadStateSupabase();
+}
+
+// Supabase REST API functions (async, run in background)
+async function saveStateSupabase() {
+  if (!SUPABASE_KEY || !state.currentUser) return;
+
+  try {
+    // Save settings
+    await sbUpsert('settings', {
+      user_id: state.currentUser,
+      exchange_rate: state.exchangeRate,
+      dark_mode: state.darkMode,
+      spread_bank: state.spreadBank,
+      spread_value: state.spreadValue,
+      storage_fees: state.storageFees
+    });
+
+    // Delete old operations for this user
+    await sbDelete('operations', `user_id=eq.${encodeURIComponent(state.currentUser)}`);
+
+    // Insert new operations
+    if (state.operations.length > 0) {
+      const opsToInsert = state.operations.map(op => ({
+        id: op.id,
+        user_id: state.currentUser,
+        metal: op.metal,
+        grams: op.grams,
+        buy_price: op.buyPrice,
+        type: op.type,
+        date: op.date
+      }));
+      await sbPost('operations', opsToInsert);
+    }
+
+    console.log('✅ Saved to Supabase');
+  } catch (e) {
+    console.error('❌ Supabase save failed:', e);
+  }
+}
+
+async function loadStateSupabase() {
+  if (!SUPABASE_KEY || !state.currentUser) return;
+
+  try {
+    // Load settings
+    const settings = await sbGet('settings', `user_id=eq.${encodeURIComponent(state.currentUser)}`);
+
+    if (settings && settings.length > 0) {
+      const s = settings[0];
+      state.exchangeRate = s.exchange_rate || 3.75;
+      state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
+      state.spreadBank = s.spread_bank || 'alahli';
+      state.spreadValue = s.spread_value !== undefined ? s.spread_value : 13;
+      state.storageFees = s.storage_fees !== undefined ? s.storage_fees : 0;
+    }
+
+    // Load operations
+    const operations = await sbGet('operations', `user_id=eq.${encodeURIComponent(state.currentUser)}&order=id.asc`);
+
+    if (operations && operations.length > 0) {
+      state.operations = operations.map(op => ({
+        id: op.id,
+        metal: op.metal,
+        grams: parseFloat(op.grams),
+        buyPrice: parseFloat(op.buy_price),
+        type: op.type,
+        date: op.date
+      }));
+      renderHoldings();
+      recalcAll();
+    }
+
+    console.log('✅ Loaded from Supabase');
+  } catch (e) {
+    console.error('❌ Supabase load failed:', e);
   }
 }
 
