@@ -336,7 +336,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       <div class="live-dot"></div>
     </div>
     <div class="topbar-actions">
-      <div class="icon-btn" id="refreshBtn" onclick="fetchPrices()" title="تحديث الأسعار">↻</div>
+      <div class="icon-btn" id="refreshBtn" onclick="gold_gold_fetchPrices()" title="تحديث الأسعار">↻</div>
       <div class="icon-btn" onclick="toggleTheme()" title="الوضع الليلي/النهاري" id="themeBtn">🌙</div>
       <div class="icon-btn" onclick="openSettings()" title="الإعدادات">⚙️</div>
       <div class="icon-btn" onclick="logout()" title="تسجيل الخروج" style="color:var(--red)">⏻</div>
@@ -460,7 +460,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
           <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">سعر صرف USD/SAR</div>
           <div class="exc-box">
             <span class="exc-label">1 USD =</span>
-            <input type="number" id="exchangeRate" value="3.75" step="0.01" onchange="saveExchangeRate();recalcAll();">
+            <input type="number" id="exchangeRate" value="3.75" step="0.01" onchange="saveExchangeRate();gold_gold_recalcAll();">
             <span class="exc-label">SAR</span>
           </div>
         </div>
@@ -480,13 +480,13 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             </div>
             <div class="inp-group">
               <label>فرق الذهب (ريال/جم)</label>
-              <input type="number" id="spreadValue" value="13" min="0" step="0.01" oninput="saveSpreadSettings();recalcAll();">
+              <input type="number" id="spreadValue" value="5.95" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
             </div>
           </div>
           <div class="row2" style="margin-top:8px;">
             <div class="inp-group">
               <label>فرق الفضة (ريال/جم)</label>
-              <input type="number" id="spreadSilver" value="0.50" min="0" step="0.01" oninput="saveSpreadSettings();recalcAll();">
+              <input type="number" id="spreadSilver" value="0.50" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
             </div>
           </div>
           <div style="margin-top:10px;background:var(--bg3);border-radius:10px;padding:10px;font-size:12px;color:var(--text2);">
@@ -502,7 +502,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
           <div id="bankCompare" style="margin-top:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px;"></div>
           <div class="inp-group" style="margin-top:12px;">
             <label>رسوم التخزين (SAR)</label>
-            <input type="number" id="storageFees" value="0" min="0" step="0.01" oninput="saveStorageFees();recalcAll();">
+            <input type="number" id="storageFees" value="0" min="0" step="0.01" oninput="saveStorageFees();gold_gold_recalcAll();">
             <button class="btn btn-outline" onclick="suggestStorageFees()" style="margin-top:8px;padding:8px;font-size:12px;">اقتراح الرسوم: 10 ريال لكل 100 جم شهرياً</button>
           </div>
           <div class="inp-group" style="margin-top:10px;">
@@ -544,7 +544,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             </div>
           </div>
           <div id="avgInfo" style="font-size:12px;color:var(--text2);background:var(--bg3);padding:10px;border-radius:8px;display:none;line-height:1.8;"></div>
-          <button class="btn btn-gold" onclick="addOperation()">✚ إضافة العملية</button>
+          <button class="btn btn-gold" onclick="gold_addOperation()">✚ إضافة العملية</button>
         </div>
       </div>
 
@@ -565,7 +565,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
               <input type="number" id="sellGrams" placeholder="0.00">
             </div>
           </div>
-          <button class="btn btn-outline" onclick="calcSell()" style="margin-top:4px;">احسب العائد</button>
+          <button class="btn btn-outline" onclick="gold_calcSell()" style="margin-top:4px;">احسب العائد</button>
           <div id="sellResult" style="display:none;background:var(--bg3);border-radius:9px;padding:12px;font-size:13px;line-height:2;"></div>
         </div>
       </div>
@@ -678,6 +678,13 @@ async function sbUpsert(table, data) {
   if (!res.ok) throw new Error(`UPSERT ${table}: ${res.status} ${await res.text()}`);
 }
 
+async function sbPatch(table, query, data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: 'PATCH', headers: SB_HEADERS, body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error(`PATCH ${table}: ${res.status} ${await res.text()}`);
+}
+
 async function sbDelete(table, query) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
     method: 'DELETE', headers: SB_HEADERS
@@ -688,151 +695,226 @@ async function sbDelete(table, query) {
 console.log('✅ Supabase REST API ready');
 
 // ═══════════════════════════════════════════
-//  STATE & STORAGE
+//  APP IDENTITY — هوية تطبيق محفظة الذهب
 // ═══════════════════════════════════════════
-let state = {
+const APP_ORIGIN = 'gold_wallet';
+
+// ═══════════════════════════════════════════
+//  GOLD STATE & STORAGE — حالة التطبيق
+// ═══════════════════════════════════════════
+let gold_gold_state = {
   goldPriceUSD: null,
   silverPriceUSD: null,
   exchangeRate: 3.75,
   operations: [],
+  deletedOperations: [],   // ✅ سلة المحذوفات (مدة 30 يوم)
   currentUser: null,
   darkMode: true,
   chartMetal: 'gold',
   chartTF: '60',
   spreadBank: 'alahli',
-  spreadValue: 13,
+  spreadValue: 5.95,
   spreadSilver: 0.50,
   storageFees: 0,
   serviceFeeRate: 10  // ريال لكل 100 جرام
 };
 
+// ═══════════════════════════════════════════
+//  TRASH (Soft-Delete) Helpers — مدة الاسترداد 30 يوم
+// ═══════════════════════════════════════════
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 يوم بالميلي ثانية
+
+function purgeOldDeleted() {
+  const now = Date.now();
+  const before = (gold_gold_state.deletedOperations || []).length;
+  gold_gold_state.deletedOperations = (gold_gold_state.deletedOperations || []).filter(op => {
+    const t = typeof op.deletedAt === 'number'
+      ? op.deletedAt
+      : new Date(op.deletedAt).getTime();
+    return !isNaN(t) && (now - t) < TRASH_RETENTION_MS;
+  });
+  return before !== gold_gold_state.deletedOperations.length;
+}
+
+function daysLeftForDeleted(op) {
+  const t = typeof op.deletedAt === 'number'
+    ? op.deletedAt
+    : new Date(op.deletedAt).getTime();
+  const remaining = TRASH_RETENTION_MS - (Date.now() - t);
+  return Math.max(0, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
+}
+
 const TROY_OZ_TO_GRAM = 31.1035;
 const BANK_SPREADS = {
-  alahli: { name: 'الأهلي', spread: 13 },
-  alrajhi: { name: 'الراجحي', spread: 15 },
-  albilad: { name: 'البلاد', spread: 14 },
-  other: { name: 'بنك آخر', spread: 13 },
-  manual: { name: 'تخصيص يدوي', spread: 13 }
+  alahli: { name: 'الأهلي', spread: 5.95 },
+  alrajhi: { name: 'الراجحي', spread: 5.95 },
+  albilad: { name: 'البلاد', spread: 5.95 },
+  other: { name: 'بنك آخر', spread: 5.95 },
+  manual: { name: 'تخصيص يدوي', spread: 5.95 }
 };
 
-function saveState() {
-  if (!state.currentUser) return;
-  const key = 'portfolio_' + state.currentUser;
+// ═══════════════════════════════════════════
+//  حفظ وتحميل البيانات — Supabase أولاً، localStorage احتياطي
+// ═══════════════════════════════════════════
+
+function gold_gold_resetState() {
+  gold_gold_state.operations = [];
+  gold_gold_state.deletedOperations = [];
+  gold_gold_state.exchangeRate = 3.75;
+  gold_gold_state.darkMode = true;
+  gold_gold_state.spreadBank = 'alahli';
+  gold_gold_state.spreadValue = 5.95;
+  gold_gold_state.spreadSilver = 0.50;
+  gold_gold_state.storageFees = 0;
+  gold_gold_state.serviceFeeRate = 10;
+}
+
+// حفظ الإعدادات فقط (بدون العمليات)
+function gold_gold_saveSettings() {
+  if (!gold_gold_state.currentUser) return;
+  // حفظ محلي
+  const key = 'portfolio_' + gold_gold_state.currentUser;
   localStorage.setItem(key, JSON.stringify({
-    operations: state.operations,
-    exchangeRate: state.exchangeRate,
-    darkMode: state.darkMode,
-    spreadBank: state.spreadBank,
-    spreadValue: state.spreadValue,
-    spreadSilver: state.spreadSilver,
-    storageFees: state.storageFees,
-    serviceFeeRate: state.serviceFeeRate
+    operations: gold_gold_state.operations,
+    exchangeRate: gold_gold_state.exchangeRate,
+    darkMode: gold_gold_state.darkMode,
+    spreadBank: gold_gold_state.spreadBank,
+    spreadValue: gold_gold_state.spreadValue,
+    spreadSilver: gold_gold_state.spreadSilver,
+    storageFees: gold_gold_state.storageFees,
+    serviceFeeRate: gold_gold_state.serviceFeeRate
   }));
-
-  // Also save to Supabase in background
-  if (SUPABASE_KEY) saveStateSupabase();
+  // حفظ Supabase
+  sbUpsert('settings', {
+    user_id: gold_gold_state.currentUser,
+    exchange_rate: gold_gold_state.exchangeRate,
+    dark_mode: gold_gold_state.darkMode,
+    spread_bank: gold_gold_state.spreadBank,
+    spread_value: gold_gold_state.spreadValue,
+    spread_silver: gold_gold_state.spreadSilver,
+    storage_fees: gold_gold_state.storageFees,
+    service_fee_rate: gold_gold_state.serviceFeeRate
+  }).catch(e => console.error('❌ save settings:', e));
 }
 
-function loadState() {
-  if (!state.currentUser) return;
-  const key = 'portfolio_' + state.currentUser;
-  const saved = localStorage.getItem(key);
-  if (saved) {
-    const d = JSON.parse(saved);
-    state.operations = d.operations || [];
-    state.exchangeRate = d.exchangeRate || 3.75;
-    state.darkMode = d.darkMode !== undefined ? d.darkMode : true;
-    state.spreadBank = d.spreadBank || 'alahli';
-    state.spreadValue = d.spreadValue !== undefined ? d.spreadValue : 13;
-    state.spreadSilver = d.spreadSilver !== undefined ? d.spreadSilver : 0.50;
-    state.storageFees = d.storageFees !== undefined ? d.storageFees : 0;
-    state.serviceFeeRate = d.serviceFeeRate !== undefined ? d.serviceFeeRate : 10;
-  }
-
-  // Also try to load from Supabase
-  if (SUPABASE_KEY) loadStateSupabase();
-}
-
-// Supabase REST API functions (async, run in background)
-async function saveStateSupabase() {
-  if (!SUPABASE_KEY || !state.currentUser) return;
-
+// إضافة عملية واحدة مباشرة إلى Supabase
+// silent = true يمنع ظهور alert (يُستخدم أثناء النقل الجماعي من localStorage)
+async function gold_gold_sbAddOperation(op, silent = false) {
   try {
-    // Save settings
-    await sbUpsert('settings', {
-      user_id: state.currentUser,
-      exchange_rate: state.exchangeRate,
-      dark_mode: state.darkMode,
-      spread_bank: state.spreadBank,
-      spread_value: state.spreadValue,
-      spread_silver: state.spreadSilver,
-      storage_fees: state.storageFees
+    const body = {
+      user_id: gold_gold_state.currentUser,
+      metal: op.metal,
+      grams: op.grams,
+      buy_price: op.buyPrice,
+      type: op.type,
+      date: op.date
+    };
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/gold_operations`, {
+      method: 'POST',
+      headers: SB_HEADERS,
+      body: JSON.stringify(body)
     });
-
-    // Delete old operations for this user
-    await sbDelete('operations', `user_id=eq.${encodeURIComponent(state.currentUser)}`);
-
-    // Insert new operations
-    if (state.operations.length > 0) {
-      const opsToInsert = state.operations.map(op => ({
-        id: op.id,
-        user_id: state.currentUser,
-        metal: op.metal,
-        grams: op.grams,
-        buy_price: op.buyPrice,
-        type: op.type,
-        date: op.date
-      }));
-      await sbPost('operations', opsToInsert);
-    }
-
-    console.log('✅ Saved to Supabase');
+    if (!res.ok) throw new Error(await res.text());
+    console.log('✅ عملية محفوظة في Supabase');
+    return true;
   } catch (e) {
-    console.error('❌ Supabase save failed:', e);
+    console.error('❌ فشل حفظ العملية:', e);
+    if (!silent) alert('❌ فشل حفظ العملية: ' + e.message);
+    return false;
   }
 }
 
-async function loadStateSupabase() {
-  if (!SUPABASE_KEY || !state.currentUser) return;
+// حذف عملية واحدة من Supabase بالتطابق التام
+async function gold_gold_sbRemoveOperation(op) {
+  try {
+    const q = `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}&metal=eq.${op.metal}&grams=eq.${op.grams}&buy_price=eq.${op.buyPrice}&date=eq.${encodeURIComponent(op.date)}`;
+    await sbDelete('gold_operations', q);
+    console.log('✅ عملية محذوفة من Supabase');
+  } catch (e) {
+    console.error('❌ فشل حذف العملية:', e);
+  }
+}
+
+// تحميل كل البيانات من Supabase
+async function gold_gold_loadFromSupabase() {
+  if (!gold_gold_state.currentUser) return;
+  gold_gold_resetState();
 
   try {
-    // Load settings
-    const settings = await sbGet('settings', `user_id=eq.${encodeURIComponent(state.currentUser)}`);
-
+    // 1) تحميل الإعدادات
+    const settings = await sbGet('settings', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`);
     if (settings && settings.length > 0) {
       const s = settings[0];
-      state.exchangeRate = s.exchange_rate || 3.75;
-      state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
-      state.spreadBank = s.spread_bank || 'alahli';
-      state.spreadValue = s.spread_value !== undefined ? s.spread_value : 13;
-      state.spreadSilver = s.spread_silver !== undefined ? s.spread_silver : 0.50;
-      state.storageFees = s.storage_fees !== undefined ? s.storage_fees : 0;
+      gold_gold_state.exchangeRate = s.exchange_rate || 3.75;
+      gold_gold_state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
+      gold_gold_state.spreadBank = s.spread_bank || 'alahli';
+      gold_gold_state.spreadValue = s.spread_value !== undefined ? s.spread_value : 5.95;
+      gold_gold_state.spreadSilver = s.spread_silver !== undefined ? s.spread_silver : 0.50;
+      gold_gold_state.storageFees = s.storage_fees !== undefined ? s.storage_fees : 0;
+      gold_gold_state.serviceFeeRate = s.service_fee_rate !== undefined ? s.service_fee_rate : 10;
     }
 
-    // Load operations
-    const operations = await sbGet('operations', `user_id=eq.${encodeURIComponent(state.currentUser)}&order=id.asc`);
-
-    if (operations && operations.length > 0) {
-      state.operations = operations.map(op => ({
-        id: op.id,
+    // 2) تحميل العمليات
+    const ops = await sbGet('gold_operations', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}&order=created_at.asc`);
+    if (ops && ops.length > 0) {
+      gold_gold_state.operations = ops.map((op, i) => ({
+        id: i + 1,
         metal: op.metal,
         grams: parseFloat(op.grams),
         buyPrice: parseFloat(op.buy_price),
         type: op.type,
         date: op.date
       }));
-      renderHoldings();
-      recalcAll();
+      console.log('✅ تم تحميل', gold_gold_state.operations.length, 'عملية من Supabase');
+    } else {
+      // Supabase فارغ → جرب localStorage
+      const key = 'portfolio_' + gold_gold_state.currentUser;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const d = JSON.parse(saved);
+        if (d.operations && d.operations.length > 0) {
+          gold_gold_state.operations = d.operations;
+          gold_gold_state.exchangeRate = d.exchangeRate || gold_gold_state.exchangeRate;
+          gold_gold_state.darkMode = d.darkMode !== undefined ? d.darkMode : gold_gold_state.darkMode;
+          gold_gold_state.spreadBank = d.spreadBank || gold_gold_state.spreadBank;
+          gold_gold_state.spreadValue = d.spreadValue !== undefined ? d.spreadValue : gold_gold_state.spreadValue;
+          gold_gold_state.spreadSilver = d.spreadSilver !== undefined ? d.spreadSilver : gold_gold_state.spreadSilver;
+          gold_gold_state.storageFees = d.storageFees !== undefined ? d.storageFees : gold_gold_state.storageFees;
+          gold_gold_state.serviceFeeRate = d.serviceFeeRate !== undefined ? d.serviceFeeRate : gold_gold_state.serviceFeeRate;
+          // رفع بيانات localStorage إلى Supabase (صامت — بدون alert لكل عملية)
+          console.log('📤 نقل', gold_gold_state.operations.length, 'عملية من localStorage إلى Supabase...');
+          let migrateOk = 0, migrateFail = 0;
+          for (const op of gold_gold_state.operations) {
+            const ok = await gold_gold_sbAddOperation(op, true);
+            if (ok) migrateOk++; else migrateFail++;
+          }
+          if (migrateFail > 0) {
+            console.warn(`⚠️ نقل ${migrateOk} عملية بنجاح، فشل ${migrateFail} — تحقق من سياسات RLS في Supabase`);
+          }
+          gold_gold_saveSettings();
+        }
+      }
+      console.log('✅ تم تحميل', gold_gold_state.operations.length, 'عملية');
     }
-
-    console.log('✅ Loaded from Supabase');
   } catch (e) {
-    console.error('❌ Supabase load failed:', e);
+    console.error('❌ فشل تحميل البيانات:', e);
+    // احتياطي: حمّل من localStorage
+    const key = 'portfolio_' + gold_gold_state.currentUser;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const d = JSON.parse(saved);
+      gold_gold_state.operations = d.operations || [];
+    }
   }
 }
 
+// saveState للتوافق مع باقي الكود (يحفظ الإعدادات فقط، العمليات تُحفظ فردياً)
+function gold_gold_saveState() {
+  gold_gold_saveSettings();
+}
+
 // ═══════════════════════════════════════════
-//  AUTH
+//  GOLD AUTH — نظام الهوية
 // ═══════════════════════════════════════════
 function switchTab(tab) {
   document.querySelectorAll('.auth-tab').forEach((t,i) => t.classList.toggle('active', (tab==='login'&&i===0)||(tab==='register'&&i===1)));
@@ -840,21 +922,26 @@ function switchTab(tab) {
   document.getElementById('registerForm').style.display = tab==='register' ? 'block' : 'none';
 }
 
-function doLogin() {
+async function doLogin() {
   const user = document.getElementById('loginUser').value.trim();
   const pass = document.getElementById('loginPass').value;
   const err = document.getElementById('loginErr');
   if (!user || !pass) { showErr(err,'يرجى ملء جميع الحقول'); return; }
-  const accounts = JSON.parse(localStorage.getItem('accounts') || '{}');
-  if (!accounts[user]) { showErr(err,'اسم المستخدم غير موجود'); return; }
-  if (accounts[user].pass !== btoa(pass)) { showErr(err,'كلمة المرور غير صحيحة'); return; }
-  err.style.display = 'none';
-  state.currentUser = user;
-  loadState();
-  enterApp();
+  try {
+    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
+    if (!accounts || accounts.length === 0) { showErr(err,'اسم المستخدم غير موجود'); return; }
+    if (accounts[0].pass_hash !== btoa(pass)) { showErr(err,'كلمة المرور غير صحيحة'); return; }
+    err.style.display = 'none';
+    gold_gold_state.currentUser = user;
+    await gold_gold_loadFromSupabase();
+    enterApp();
+  } catch (e) {
+    console.error('Login error:', e);
+    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+  }
 }
 
-function doRegister() {
+async function doRegister() {
   const user = document.getElementById('regUser').value.trim();
   const pass = document.getElementById('regPass').value;
   const pass2 = document.getElementById('regPass2').value;
@@ -863,23 +950,42 @@ function doRegister() {
   if (!user || !pass) { showErr(err,'يرجى ملء الحقول المطلوبة'); return; }
   if (pass.length < 4) { showErr(err,'كلمة المرور يجب أن تكون 4 أحرف على الأقل'); return; }
   if (pass !== pass2) { showErr(err,'كلمتا المرور غير متطابقتان'); return; }
-  const accounts = JSON.parse(localStorage.getItem('accounts') || '{}');
-  if (accounts[user]) { showErr(err,'اسم المستخدم موجود بالفعل'); return; }
-  accounts[user] = { pass: btoa(pass), hint: hint || 'لا يوجد تلميح' };
-  localStorage.setItem('accounts', JSON.stringify(accounts));
-  err.style.display = 'none';
-  alert('✅ تم إنشاء الحساب بنجاح! يمكنك الدخول الآن.');
-  switchTab('login');
-  document.getElementById('loginUser').value = user;
+  try {
+    // التحقق من تكرار اسم المستخدم في Supabase
+    const existing = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
+    if (existing && existing.length > 0) {
+      showErr(err,'هذا الاسم محجوز مسبقاً في نظامنا الموحد');
+      return;
+    }
+    // إنشاء الحساب في Supabase
+    await sbPost('users', {
+      user_id: user,
+      pass_hash: btoa(pass),
+      hint: hint || 'لا يوجد تلميح',
+      created_from: APP_ORIGIN
+    });
+    err.style.display = 'none';
+    alert('✅ تم إنشاء الحساب بنجاح! يمكنك الدخول الآن.');
+    switchTab('login');
+    document.getElementById('loginUser').value = user;
+  } catch (e) {
+    console.error('Register error:', e);
+    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+  }
 }
 
-function showHint() {
+async function showHint() {
   const user = document.getElementById('loginUser').value.trim();
   const hintBox = document.getElementById('hintBox');
   if (!user) { hintBox.style.display = 'block'; document.getElementById('hintText').textContent = 'أدخل اسم المستخدم أولاً'; return; }
-  const accounts = JSON.parse(localStorage.getItem('accounts') || '{}');
-  hintBox.style.display = 'block';
-  document.getElementById('hintText').textContent = accounts[user] ? accounts[user].hint : 'اسم المستخدم غير موجود';
+  try {
+    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
+    hintBox.style.display = 'block';
+    document.getElementById('hintText').textContent = (accounts && accounts.length > 0) ? accounts[0].hint : 'اسم المستخدم غير موجود';
+  } catch (e) {
+    hintBox.style.display = 'block';
+    document.getElementById('hintText').textContent = 'خطأ في الاتصال';
+  }
 }
 
 function showErr(el, msg) {
@@ -899,9 +1005,9 @@ function closeLogoutModal() {
 function confirmLogout() {
   const saveData = document.getElementById('saveDataCheckbox').checked;
   if (saveData) {
-    saveState();
+    gold_gold_saveState();
     // حفظ اسم المستخدم وكلمة المرور في حقول تسجيل الدخول
-    const user = state.currentUser;
+    const user = gold_gold_state.currentUser;
     const pass = document.getElementById('loginPass').value;
     if (user) localStorage.setItem('savedUsername', user);
     if (pass) localStorage.setItem('savedPassword', pass);
@@ -910,53 +1016,63 @@ function confirmLogout() {
     localStorage.removeItem('savedUsername');
     localStorage.removeItem('savedPassword');
   }
-  state.currentUser = null;
+  // تصفير كامل للبيانات عند الخروج لمنع تسرب بيانات لمستخدم آخر
+  gold_gold_state.currentUser = null;
+  gold_gold_resetState();
   document.getElementById('app').style.display = 'none';
   document.getElementById('authScreen').style.display = 'flex';
   closeLogoutModal();
 }
 
 function enterApp() {
-  sessionStorage.setItem('currentUser', state.currentUser);
+  sessionStorage.setItem('currentUser', gold_gold_state.currentUser);
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
-  document.getElementById('usernameDisplay').textContent = state.currentUser;
+  document.getElementById('usernameDisplay').textContent = gold_gold_state.currentUser;
   applyTheme();
-  document.getElementById('exchangeRate').value = state.exchangeRate;
-  document.getElementById('storageFees').value = state.storageFees;
-  document.getElementById('serviceFeeRate').value = state.serviceFeeRate !== undefined ? state.serviceFeeRate : 10;
+  document.getElementById('exchangeRate').value = gold_gold_state.exchangeRate;
+  document.getElementById('storageFees').value = gold_gold_state.storageFees;
+  document.getElementById('serviceFeeRate').value = gold_gold_state.serviceFeeRate !== undefined ? gold_gold_state.serviceFeeRate : 10;
   initSpreadSettings();
-  fetchPrices();
-  renderHoldings();
-  recalcAll();
+  gold_gold_fetchPrices();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
   renderTVChart();
-  setInterval(fetchPrices, 60000);
+  setInterval(gold_gold_fetchPrices, 60000);
 }
 
-function changePassword() {
+async function changePassword() {
   const old = document.getElementById('oldPass').value;
   const nw = document.getElementById('newPass').value;
   const nw2 = document.getElementById('newPass2').value;
   const err = document.getElementById('passErr');
-  const accounts = JSON.parse(localStorage.getItem('accounts') || '{}');
-  if (accounts[state.currentUser].pass !== btoa(old)) { showErr(err,'كلمة المرور الحالية غير صحيحة'); return; }
-  if (nw.length < 4) { showErr(err,'كلمة المرور الجديدة قصيرة جداً'); return; }
-  if (nw !== nw2) { showErr(err,'كلمتا المرور الجديدتان غير متطابقتين'); return; }
-  accounts[state.currentUser].pass = btoa(nw);
-  localStorage.setItem('accounts', JSON.stringify(accounts));
-  alert('✅ تم تغيير كلمة المرور بنجاح!');
-  document.getElementById('oldPass').value = '';
-  document.getElementById('newPass').value = '';
-  document.getElementById('newPass2').value = '';
+  try {
+    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`);
+    if (!accounts || accounts.length === 0 || accounts[0].pass_hash !== btoa(old)) {
+      showErr(err,'كلمة المرور الحالية غير صحيحة'); return;
+    }
+    if (nw.length < 4) { showErr(err,'كلمة المرور الجديدة قصيرة جداً'); return; }
+    if (nw !== nw2) { showErr(err,'كلمتا المرور الجديدتان غير متطابقتين'); return; }
+    // تحديث كلمة المرور في Supabase
+    await sbPatch('users', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`, { pass_hash: btoa(nw) });
+    alert('✅ تم تغيير كلمة المرور بنجاح!');
+    document.getElementById('oldPass').value = '';
+    document.getElementById('newPass').value = '';
+    document.getElementById('newPass2').value = '';
+  } catch (e) {
+    console.error('Change password error:', e);
+    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+  }
 }
 
-function clearAllData() {
+async function clearAllData() {
   if (!confirm('⚠️ سيتم حذف جميع بيانات المحفظة. هل أنت متأكد؟')) return;
-  state.operations = [];
-  saveState();
-  renderHoldings();
-  recalcAll();
+  gold_gold_state.operations = [];
+  try { await sbDelete('gold_operations', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`); } catch(e) {}
+  gold_gold_saveSettings();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
   closeSettings();
 }
 
@@ -964,20 +1080,20 @@ function clearAllData() {
 //  THEME
 // ═══════════════════════════════════════════
 function toggleTheme() {
-  state.darkMode = !state.darkMode;
+  gold_gold_state.darkMode = !gold_gold_state.darkMode;
   applyTheme();
-  saveState();
+  gold_gold_saveState();
 }
 
 function applyTheme() {
-  document.documentElement.setAttribute('data-theme', state.darkMode ? 'dark' : 'light');
-  document.getElementById('themeBtn').textContent = state.darkMode ? '🌙' : '☀️';
+  document.documentElement.setAttribute('data-theme', gold_gold_state.darkMode ? 'dark' : 'light');
+  document.getElementById('themeBtn').textContent = gold_gold_state.darkMode ? '🌙' : '☀️';
   const toggle = document.getElementById('darkToggle');
-  if (toggle) toggle.checked = state.darkMode;
+  if (toggle) toggle.checked = gold_gold_state.darkMode;
 }
 
 // ═══════════════════════════════════════════
-//  PRICES — CORS proxy helper + multi-source
+//  GOLD PRICES — أسعار المعادن (CORS proxy helper + multi-source
 // ═══════════════════════════════════════════
 
 // Fetch JSON racing multiple CORS proxies in parallel — first success wins.
@@ -1011,7 +1127,7 @@ async function proxyFetch(url, timeout = 8000) {
 const chartCache = new Map();
 const CHART_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-async function fetchPrices() {
+async function gold_gold_fetchPrices() {
   const btn = document.getElementById('refreshBtn');
   btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div>';
 
@@ -1019,8 +1135,8 @@ async function fetchPrices() {
   let priceSource = 'fallback';
 
   // Use last successful prices as fallback
-  if (state.lastGoldPriceUSD) goldOz = state.lastGoldPriceUSD;
-  if (state.lastSilverPriceUSD) silverOz = state.lastSilverPriceUSD;
+  if (gold_gold_state.lastGoldPriceUSD) goldOz = gold_gold_state.lastGoldPriceUSD;
+  if (gold_gold_state.lastSilverPriceUSD) silverOz = gold_gold_state.lastSilverPriceUSD;
 
   // ── Source 1: api.gold-api.com (CORS-enabled, no key, works from file://) ──
   try {
@@ -1072,15 +1188,15 @@ async function fetchPrices() {
 
   console.log(`✅ Prices from: ${priceSource} | Gold: $${goldOz.toFixed(2)}/oz | Silver: $${silverOz.toFixed(2)}/oz`);
 
-  const prevGold = state.goldPriceUSD;
-  const prevSilver = state.silverPriceUSD;
+  const prevGold = gold_gold_state.goldPriceUSD;
+  const prevSilver = gold_gold_state.silverPriceUSD;
 
-  state.goldPriceUSD = goldOz / TROY_OZ_TO_GRAM;
-  state.silverPriceUSD = silverOz / TROY_OZ_TO_GRAM;
+  gold_gold_state.goldPriceUSD = goldOz / TROY_OZ_TO_GRAM;
+  gold_gold_state.silverPriceUSD = silverOz / TROY_OZ_TO_GRAM;
 
   // Save last successful prices for fallback
-  if (state.goldPriceUSD > 0) state.lastGoldPriceUSD = state.goldPriceUSD;
-  if (state.silverPriceUSD > 0) state.lastSilverPriceUSD = state.silverPriceUSD;
+  if (gold_gold_state.goldPriceUSD > 0) gold_gold_state.lastGoldPriceUSD = gold_gold_state.goldPriceUSD;
+  if (gold_gold_state.silverPriceUSD > 0) gold_gold_state.lastSilverPriceUSD = gold_gold_state.silverPriceUSD;
 
   // Update status badges
   document.getElementById('goldStatus').textContent   = priceSource !== 'fallback' ? '● مباشر' : '● تقريبي';
@@ -1089,14 +1205,14 @@ async function fetchPrices() {
   document.getElementById('silverStatus').style.color  = priceSource !== 'fallback' ? 'var(--green)' : 'var(--red)';
 
   updatePriceDisplay(prevGold, prevSilver);
-  recalcAll();
+  gold_gold_recalcAll();
   btn.innerHTML = '↻';
 }
 
 function updatePriceDisplay(prevGold, prevSilver) {
-  const er = state.exchangeRate;
-  const gUSD = state.goldPriceUSD;
-  const sUSD = state.silverPriceUSD;
+  const er = gold_gold_state.exchangeRate;
+  const gUSD = gold_gold_state.goldPriceUSD;
+  const sUSD = gold_gold_state.silverPriceUSD;
 
   if(!gUSD) return;
 
@@ -1106,7 +1222,7 @@ function updatePriceDisplay(prevGold, prevSilver) {
   document.getElementById('silverPriceSAR').textContent = fmt(sUSD * er, 3) + ' ﷼';
   updateSpreadDisplay();
 
-  // Status badges are now set by fetchPrices() based on actual source
+  // Status badges are now set by gold_gold_fetchPrices() based on actual source
 
   // Ticker
   document.getElementById('tGold').textContent = fmt(gUSD * TROY_OZ_TO_GRAM, 2) + ' $';
@@ -1127,13 +1243,13 @@ function updatePriceDisplay(prevGold, prevSilver) {
 }
 
 function getGlobalPriceSAR(metal) {
-  const usd = metal === 'gold' ? state.goldPriceUSD : state.silverPriceUSD;
-  return usd ? usd * state.exchangeRate : 0;
+  const usd = metal === 'gold' ? gold_gold_state.goldPriceUSD : gold_gold_state.silverPriceUSD;
+  return usd ? usd * gold_gold_state.exchangeRate : 0;
 }
 
 function getSpread(metal) {
   // spread مستقل لكل معدن — الفضة لها فارق سعري أصغر بكثير من الذهب
-  return metal === 'gold' ? (state.spreadValue || 0) : (state.spreadSilver || 0);
+  return metal === 'gold' ? (gold_gold_state.spreadValue || 0) : (gold_gold_state.spreadSilver || 0);
 }
 
 function getLocalBuyPriceSAR(metal) {
@@ -1146,9 +1262,9 @@ function getLocalSellPriceSAR(metal) {
   if (globalPrice) return Math.max(globalPrice - getSpread(metal), 0);
 
   // Fallback to last successful price
-  const lastPriceUSD = metal === 'gold' ? state.lastGoldPriceUSD : state.lastSilverPriceUSD;
+  const lastPriceUSD = metal === 'gold' ? gold_gold_state.lastGoldPriceUSD : gold_gold_state.lastSilverPriceUSD;
   if (lastPriceUSD) {
-    const lastPriceSAR = lastPriceUSD * state.exchangeRate;
+    const lastPriceSAR = lastPriceUSD * gold_gold_state.exchangeRate;
     return Math.max(lastPriceSAR - getSpread(metal), 0);
   }
 
@@ -1156,52 +1272,52 @@ function getLocalSellPriceSAR(metal) {
 }
 
 function initSpreadSettings() {
-  document.getElementById('spreadBank').value = state.spreadBank;
-  document.getElementById('spreadValue').value = state.spreadValue;
-  document.getElementById('spreadSilver').value = state.spreadSilver !== undefined ? state.spreadSilver : 0.50;
+  document.getElementById('spreadBank').value = gold_gold_state.spreadBank;
+  document.getElementById('spreadValue').value = gold_gold_state.spreadValue;
+  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.50;
   updateSpreadDisplay();
 }
 
 function selectSpreadBank() {
   const bank = document.getElementById('spreadBank').value;
-  state.spreadBank = bank;
+  gold_gold_state.spreadBank = bank;
   if (BANK_SPREADS[bank] && bank !== 'manual') {
-    state.spreadValue = BANK_SPREADS[bank].spread;
-    document.getElementById('spreadValue').value = state.spreadValue;
-  document.getElementById('spreadSilver').value = state.spreadSilver !== undefined ? state.spreadSilver : 0.50;
+    gold_gold_state.spreadValue = BANK_SPREADS[bank].spread;
+    document.getElementById('spreadValue').value = gold_gold_state.spreadValue;
+  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.50;
   }
-  saveState();
-  updatePriceDisplay(state.goldPriceUSD, state.silverPriceUSD);
-  recalcAll();
+  gold_gold_saveState();
+  updatePriceDisplay(gold_gold_state.goldPriceUSD, gold_gold_state.silverPriceUSD);
+  gold_gold_recalcAll();
 }
 
 function saveSpreadSettings() {
-  state.spreadBank = document.getElementById('spreadBank').value;
-  state.spreadValue = parseFloat(document.getElementById('spreadValue').value) || 0;
-  state.spreadSilver = parseFloat(document.getElementById('spreadSilver').value) || 0;
-  saveState();
+  gold_gold_state.spreadBank = document.getElementById('spreadBank').value;
+  gold_gold_state.spreadValue = parseFloat(document.getElementById('spreadValue').value) || 0;
+  gold_gold_state.spreadSilver = parseFloat(document.getElementById('spreadSilver').value) || 0;
+  gold_gold_saveState();
   updateSpreadDisplay();
 }
 
 function saveStorageFees() {
-  state.storageFees = parseFloat(document.getElementById('storageFees').value) || 0;
-  saveState();
+  gold_gold_state.storageFees = parseFloat(document.getElementById('storageFees').value) || 0;
+  gold_gold_saveState();
 }
 
 function saveServiceFeeRate() {
-  state.serviceFeeRate = parseFloat(document.getElementById('serviceFeeRate').value);
-  if (isNaN(state.serviceFeeRate) || state.serviceFeeRate < 0) state.serviceFeeRate = 0;
-  saveState();
-  recalcAll();
+  gold_gold_state.serviceFeeRate = parseFloat(document.getElementById('serviceFeeRate').value);
+  if (isNaN(gold_gold_state.serviceFeeRate) || gold_gold_state.serviceFeeRate < 0) gold_gold_state.serviceFeeRate = 0;
+  gold_gold_saveState();
+  gold_gold_recalcAll();
 }
 
 function suggestStorageFees() {
-  const totalGrams = state.operations.reduce((sum, op) => sum + op.grams, 0);
+  const totalGrams = gold_gold_state.operations.reduce((sum, op) => sum + op.grams, 0);
   const suggestedFees = totalGrams * 10 / 100;
-  state.storageFees = suggestedFees;
+  gold_gold_state.storageFees = suggestedFees;
   document.getElementById('storageFees').value = suggestedFees.toFixed(2);
-  saveState();
-  recalcAll();
+  gold_gold_saveState();
+  gold_gold_recalcAll();
 }
 
 function updateSpreadDisplay() {
@@ -1227,13 +1343,13 @@ function updateSpreadDisplay() {
 }
 
 function saveExchangeRate() {
-  state.exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 3.75;
-  updatePriceDisplay(state.goldPriceUSD, state.silverPriceUSD);
-  saveState();
+  gold_gold_state.exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 3.75;
+  updatePriceDisplay(gold_gold_state.goldPriceUSD, gold_gold_state.silverPriceUSD);
+  gold_gold_saveState();
 }
 
 // ═══════════════════════════════════════════
-//  OPERATIONS
+//  GOLD OPERATIONS — عمليات الذهب والفضة
 // ═══════════════════════════════════════════
 let opType = 'buy';
 
@@ -1257,7 +1373,7 @@ function updateAvgInfo() {
 
   if (!newGrams || !newPrice) { box.style.display = 'none'; return; }
 
-  const existing = state.operations.filter(o => o.metal === metal);
+  const existing = gold_gold_state.operations.filter(o => o.metal === metal);
   let totalGrams = 0, totalCost = 0;
   existing.forEach(o => {
     if (o.type === 'buy') {
@@ -1280,7 +1396,7 @@ document.addEventListener('input', e => {
   if(['opGrams','opPrice','opMetal'].includes(e.target.id)) updateAvgInfo();
 });
 
-function addOperation() {
+async function gold_addOperation() {
   const metal = document.getElementById('opMetal').value;
   const grams = parseFloat(document.getElementById('opGrams').value);
   const price = parseFloat(document.getElementById('opPrice').value);
@@ -1290,39 +1406,43 @@ function addOperation() {
     return;
   }
 
-  state.operations.push({
+  const newOp = {
     id: Date.now(),
     metal,
     grams,
     buyPrice: price,
     type: opType,
     date: new Date().toLocaleDateString('ar-SA')
-  });
+  };
 
-  saveState();
-  renderHoldings();
-  recalcAll();
+  gold_gold_state.operations.push(newOp);
+  await gold_gold_sbAddOperation(newOp);
+  gold_gold_saveSettings();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
   document.getElementById('opGrams').value = '';
   document.getElementById('opPrice').value = '';
   document.getElementById('avgInfo').style.display = 'none';
 }
 
-function deleteOp(id) {
+async function gold_deleteOp(id) {
   if (!confirm('حذف هذه العملية؟')) return;
-  state.operations = state.operations.filter(o => o.id !== id);
-  saveState();
-  renderHoldings();
-  recalcAll();
+  const op = gold_gold_state.operations.find(o => o.id === id);
+  gold_gold_state.operations = gold_gold_state.operations.filter(o => o.id !== id);
+  if (op) await gold_gold_sbRemoveOperation(op);
+  gold_gold_saveSettings();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
 }
 
 function openOperationModal(id) {
-  const op = state.operations.find(o => o.id === id);
+  const op = gold_gold_state.operations.find(o => o.id === id);
   if (!op) return;
 
   const metal = op.metal;
   const metalName = metal === 'gold' ? '🟡 ذهب' : '⚪ فضة';
   const metalColor = metal === 'gold' ? 'var(--gold)' : 'var(--silver)';
-  const operations = state.operations.filter(o => o.metal === metal);
+  const operations = gold_gold_state.operations.filter(o => o.metal === metal);
 
   let totalBuyGrams = 0, totalBuyCost = 0;
   let totalSellGrams = 0, totalSellRevenue = 0;
@@ -1375,13 +1495,13 @@ function openOperationModal(id) {
   }).join('');
 
   const avgPrice = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
-  const storageFees = state.storageFees || 0;
+  const storageFees = gold_gold_state.storageFees || 0;
   // ✅ سعر البيع الفعلي (بعد خصم spread البنك)
   const marketPrice = getLocalSellPriceSAR(metal);
   const currentHoldingGrams = totalBuyGrams - totalSellGrams;
   const currentValue = currentHoldingGrams * (marketPrice || 0);
   // ✅ رسوم الخدمة على هذه العملية
-  const opServiceFees = calcServiceFees(currentHoldingGrams);
+  const opServiceFees = gold_gold_calcServiceFees(currentHoldingGrams);
   const netPnl = currentValue - totalBuyCost + totalSellRevenue - storageFees - opServiceFees;
   const netPnlColor = netPnl >= 0 ? 'var(--green)' : 'var(--red)';
 
@@ -1499,9 +1619,9 @@ function cancelEditOperation(id, e) {
   editRow.style.display = 'none';
 }
 
-function saveSingleOperation(id, e) {
+async function saveSingleOperation(id, e) {
   if (e) e.stopPropagation();
-  const op = state.operations.find(o => o.id === id);
+  const op = gold_gold_state.operations.find(o => o.id === id);
   if (!op) return;
   const grams = parseFloat(document.getElementById(`editGrams${id}`).value);
   const buyPrice = parseFloat(document.getElementById(`editPrice${id}`).value);
@@ -1509,41 +1629,46 @@ function saveSingleOperation(id, e) {
     alert('يرجى إدخال الكمية وسعر الشراء بشكل صحيح');
     return;
   }
+  // حفظ القيم القديمة للحذف من Supabase
+  const oldOp = {metal: op.metal, grams: op.grams, buyPrice: op.buyPrice, date: op.date};
   op.grams = grams;
   op.buyPrice = buyPrice;
   op.date = new Date().toLocaleDateString('ar-SA');
-  saveState();
-  renderHoldings();
-  recalcAll();
+  // تحديث في Supabase: حذف القديمة وإضافة الجديدة
+  gold_gold_sbRemoveOperation(oldOp).then(() => gold_gold_sbAddOperation(op)).catch(e => console.error('❌ update op:', e));
+  gold_gold_saveSettings();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
   openOperationModal(id);
 }
 
-function deleteOperationFromModal(id, e) {
+async function deleteOperationFromModal(id, e) {
   if (e) e.stopPropagation();
   if (!confirm('هل تريد حذف هذه العملية نهائياً؟')) return;
-  const op = state.operations.find(o => o.id === id);
+  const op = gold_gold_state.operations.find(o => o.id === id);
   const metal = op ? op.metal : 'gold';
-  state.operations = state.operations.filter(o => o.id !== id);
-  saveState();
-  renderHoldings();
-  recalcAll();
-  if (state.operations.some(o => o.metal === metal)) {
-    const remainingOp = state.operations.find(o => o.metal === metal);
+  gold_gold_state.operations = gold_gold_state.operations.filter(o => o.id !== id);
+  if (op) await gold_gold_sbRemoveOperation(op);
+  gold_gold_saveSettings();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
+  if (gold_gold_state.operations.some(o => o.metal === metal)) {
+    const remainingOp = gold_gold_state.operations.find(o => o.metal === metal);
     openOperationModal(remainingOp.id);
   } else {
     closeOperationModal();
   }
 }
 
-function renderHoldings() {
+function gold_gold_renderHoldings() {
   const tbody = document.getElementById('holdingsTbody');
-  if (!state.operations.length) {
+  if (!gold_gold_state.operations.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="icon">📭</div><div>لا توجد عمليات بعد</div></td></tr>';
     return;
   }
 
-  const goldOps = state.operations.filter(o => o.metal === 'gold');
-  const silverOps = state.operations.filter(o => o.metal === 'silver');
+  const goldOps = gold_gold_state.operations.filter(o => o.metal === 'gold');
+  const silverOps = gold_gold_state.operations.filter(o => o.metal === 'silver');
 
   let goldBuyGrams = 0, goldSellGrams = 0;
   let silverBuyGrams = 0, silverSellGrams = 0;
@@ -1593,8 +1718,8 @@ function renderHoldings() {
     // ✅ سعر البيع الفعلي (سعر السوق − spread البنك) — نفس القيمة المستخدمة في recalcAll
     let currentSellPrice = getLocalSellPriceSAR(metal);
     if (currentSellPrice === 0) {
-      const lastPriceUSD = metal === 'gold' ? state.lastGoldPriceUSD : state.lastSilverPriceUSD;
-      if (lastPriceUSD) currentSellPrice = Math.max(lastPriceUSD * state.exchangeRate - state.spreadValue, 0);
+      const lastPriceUSD = metal === 'gold' ? gold_gold_state.lastGoldPriceUSD : gold_gold_state.lastSilverPriceUSD;
+      if (lastPriceUSD) currentSellPrice = Math.max(lastPriceUSD * gold_gold_state.exchangeRate - gold_gold_state.spreadValue, 0);
     }
 
     // ── مرحلة أولى: احسب الإجماليات الكاملة أولاً ──
@@ -1609,8 +1734,8 @@ function renderHoldings() {
     const holdingGrams = totalBuyGrams - totalSellGrams;
     const avgPrice     = totalBuyGrams > 0 ? totalBuyCost / totalBuyGrams : 0;
     const currentVal   = holdingGrams * currentSellPrice;
-    const serviceFees  = calcServiceFees(holdingGrams);
-    const storageFees  = state.storageFees || 0;
+    const serviceFees  = gold_gold_calcServiceFees(holdingGrams);
+    const storageFees  = gold_gold_state.storageFees || 0;
 
     // ✅ المجموع الكلي = القيمة الحالية − تكلفة الشراء + عائد البيع − رسوم التخزين − رسوم الخدمة
     const netPnl = currentVal - totalBuyCost + totalSellRevenue - storageFees - serviceFees;
@@ -1653,7 +1778,7 @@ function renderHoldings() {
         <td class="num ${opPnl>=0?'pos':'neg'}" style="text-align:right;">${opPnl>=0?'+':''}${fmt(opPnl,0)}</td>
         <td style="text-align:center;">
           <button class="del-btn" onclick="enableEditOperation(${op.id}, event)" style="margin-left:4px;">✏️</button>
-          <button class="del-btn" onclick="deleteOp(${op.id})">🗑️</button>
+          <button class="del-btn" onclick="gold_deleteOp(${op.id})">🗑️</button>
         </td>
       </tr>`;
     }).join('');
@@ -1691,23 +1816,32 @@ function renderHoldings() {
               <div style="font-size:11px;color:var(--text3);">صافي الربح/الخسارة</div>
               <div class="num" style="font-size:14px;font-weight:700;color:${netPnl>=0?'var(--green)':'var(--red)'};">${netPnl>=0?'+':''}${fmt(netPnl,0)} ريال</div>
             </div>
+            <div style="text-align:left;background:${netPnl>=0?'rgba(34,197,94,0.1)':'rgba(239,68,68,0.1)'};border:1px solid ${netPnl>=0?'rgba(34,197,94,0.3)':'rgba(239,68,68,0.3)'};border-radius:8px;padding:6px 12px;">
+              <div style="font-size:10px;color:var(--text3);margin-bottom:2px;">💰 الإجمالي المتحرك</div>
+              <div class="num" style="font-size:16px;font-weight:900;color:${netPnl>=0?'var(--green)':'var(--red)'};">${fmt(totalBuyCost + netPnl, 0)} ريال</div>
+              <div style="font-size:10px;color:var(--text3);">${fmt(totalBuyCost,0)} + (${netPnl>=0?'+':''}${fmt(netPnl,0)})</div>
+            </div>
           </div>
-          <table style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border2);">
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">النوع</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">الكمية</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">سعر/جم</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">التكلفة</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المتوسط</th>
-                <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المكسب/الخسارة</th>
-                <th style="padding:8px;text-align:center;font-size:11px;color:var(--text3);"></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows}
-              ${sumRow}
-            </tbody>
+          <div style="max-height:260px;overflow-y:auto;border-radius:8px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead style="position:sticky;top:0;z-index:2;background:var(--bg3);">
+                <tr style="border-bottom:1px solid var(--border2);">
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">النوع</th>
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">الكمية</th>
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">سعر/جم</th>
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">التكلفة</th>
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المتوسط</th>
+                  <th style="padding:8px;text-align:right;font-size:11px;color:var(--text3);">المكسب/الخسارة</th>
+                  <th style="padding:8px;text-align:center;font-size:11px;color:var(--text3);"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+          <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+            <tbody>${sumRow}</tbody>
           </table>
         </div>
       </td></tr>
@@ -1721,17 +1855,17 @@ function renderHoldings() {
 }
 
 // ═══════════════════════════════════════════
-//  CALCULATIONS
+//  GOLD CALCULATIONS — معادلات الحساب
 // ═══════════════════════════════════════════
 // ─── حساب رسوم الخدمة لكمية معينة بالجرام ───
 // المعدل الافتراضي: 10 ريال لكل 100 جرام (قابل للتغيير)
-function calcServiceFees(grams) {
-  const feeRate = state.serviceFeeRate !== undefined ? state.serviceFeeRate : 10; // ريال / 100 جرام
+function gold_gold_calcServiceFees(grams) {
+  const feeRate = gold_gold_state.serviceFeeRate !== undefined ? gold_gold_state.serviceFeeRate : 10; // ريال / 100 جرام
   return (grams * feeRate) / 100;
 }
 
-function recalcAll() {
-  const er = state.exchangeRate;
+function gold_gold_recalcAll() {
+  const er = gold_gold_state.exchangeRate;
 
   // ✅ سعر البيع الفعلي (سعر السوق − spread) — نفس ما تستخدمه الصفوف في الجدول
   const goldSellPriceSAR   = getLocalSellPriceSAR('gold');
@@ -1747,8 +1881,8 @@ function recalcAll() {
   let sRunBuyGrams = 0, sRunBuyCost = 0, sRunSellGrams = 0;
 
   // افصل العمليات لكل معدن بالترتيب
-  const goldOps   = state.operations.filter(o => o.metal === 'gold');
-  const silverOps = state.operations.filter(o => o.metal === 'silver');
+  const goldOps   = gold_gold_state.operations.filter(o => o.metal === 'gold');
+  const silverOps = gold_gold_state.operations.filter(o => o.metal === 'silver');
 
   goldOps.forEach(op => {
     const cost = op.grams * op.buyPrice;
@@ -1786,9 +1920,9 @@ function recalcAll() {
   const silverVal = silverHoldingGrams * silverSellPriceSAR;
 
   const totalBuyCost     = goldBuyCost + silverBuyCost;
-  const storageFees      = state.storageFees || 0;
+  const storageFees      = gold_gold_state.storageFees || 0;
   const totalHoldingGrams = goldHoldingGrams + silverHoldingGrams;
-  const serviceFees = calcServiceFees(totalHoldingGrams);
+  const serviceFees = gold_gold_calcServiceFees(totalHoldingGrams);
 
   // ✅ الـ PnL النهائي = مجموع ربح كل عملية (نفس الجدول) − الرسوم
   const pnl    = totalPnlBeforeFees - storageFees - serviceFees;
@@ -1815,19 +1949,19 @@ function recalcAll() {
   document.getElementById('sCapital').textContent    = fmt(totalBuyCost, 0) + ' SAR';
   document.getElementById('sCapitalSub').textContent = fmt(totalBuyCost / er, 0) + ' USD';
 
-  renderHoldings();
+  gold_gold_renderHoldings();
 }
 
-function calcSell() {
+function gold_calcSell() {
   const metal = document.getElementById('sellMetal').value;
   const grams = parseFloat(document.getElementById('sellGrams').value) || 0;
-  const er = state.exchangeRate;
+  const er = gold_gold_state.exchangeRate;
   const mPriceSAR = getLocalSellPriceSAR(metal);
 
   if (!grams || !mPriceSAR) { alert('يرجى إدخال الكمية أولاً وتحديث الأسعار'); return; }
 
-  const avail = state.operations.filter(o => o.metal === metal).reduce((s, o) => s + o.grams, 0);
-  const avgCost = state.operations.filter(o => o.metal === metal).reduce((s, o) => s + o.grams * o.buyPrice, 0) / (avail || 1);
+  const avail = gold_gold_state.operations.filter(o => o.metal === metal).reduce((s, o) => s + o.grams, 0);
+  const avgCost = gold_gold_state.operations.filter(o => o.metal === metal).reduce((s, o) => s + o.grams * o.buyPrice, 0) / (avail || 1);
 
   const revenue = grams * mPriceSAR;
   const cost = grams * avgCost;
@@ -1858,25 +1992,25 @@ function renderTVChart() {
 
   // TVC:GOLD / TVC:SILVER = publicly accessible spot symbols in the free widget.
   // (COMEX:GC1! / COMEX:SI1! futures require a paid TradingView plan.)
-  const symbol = state.chartMetal === 'gold' ? 'TVC:GOLD' : 'TVC:SILVER';
+  const symbol = gold_gold_state.chartMetal === 'gold' ? 'TVC:GOLD' : 'TVC:SILVER';
 
   // ── If widget already exists, just switch symbol — preserves indicators, drawings, AND current timeframe ──
   if (tvWidget && typeof tvWidget.setSymbol === 'function') {
     try {
       // Read current interval from widget so TF stays whatever user picked in TradingView's toolbar.
-      let currentInterval = state.chartTF;
+      let currentInterval = gold_gold_state.chartTF;
       try {
         if (typeof tvWidget.activeChart === 'function') {
           currentInterval = tvWidget.activeChart().resolution() || currentInterval;
         } else if (tvWidget.options && tvWidget.options.interval) {
           currentInterval = tvWidget.options.interval;
         }
-      } catch (_) { /* fallback to state.chartTF */ }
+      } catch (_) { /* fallback to gold_gold_state.chartTF */ }
 
       tvWidget.setSymbol(symbol, currentInterval, () => {});
-      state.chartTF = currentInterval;
+      gold_gold_state.chartTF = currentInterval;
       document.getElementById('chartTitle').textContent =
-        (state.chartMetal === 'gold' ? 'TVC:GOLD — الذهب (فوري)' : 'TVC:SILVER — الفضة (فوري)');
+        (gold_gold_state.chartMetal === 'gold' ? 'TVC:GOLD — الذهب (فوري)' : 'TVC:SILVER — الفضة (فوري)');
       return;
     } catch (e) {
       console.warn('setSymbol failed, recreating widget:', e);
@@ -1896,9 +2030,9 @@ function renderTVChart() {
   tvWidget = new TradingView.widget({
     autosize: true,
     symbol: symbol,
-    interval: state.chartTF,
+    interval: gold_gold_state.chartTF,
     timezone: 'Asia/Riyadh',
-    theme: state.darkMode ? 'dark' : 'light',
+    theme: gold_gold_state.darkMode ? 'dark' : 'light',
     style: '1',               // Candles
     locale: 'ar',
     toolbar_bg: '#0B0C0F',
@@ -1919,7 +2053,7 @@ function renderTVChart() {
   });
 
   document.getElementById('chartTitle').textContent =
-    (state.chartMetal === 'gold' ? 'TVC:GOLD — الذهب (فوري)' : 'TVC:SILVER — الفضة (فوري)');
+    (gold_gold_state.chartMetal === 'gold' ? 'TVC:GOLD — الذهب (فوري)' : 'TVC:SILVER — الفضة (فوري)');
 }
 
 // ===== LEGACY LIGHTWEIGHT CHARTS CODE — DISABLED (kept as no-op stubs) =====
@@ -2085,8 +2219,8 @@ async function loadChartData() {
   const spinner = document.getElementById('chartSpinner');
   spinner.style.display = 'inline-block';
 
-  const metal = state.chartMetal;
-  const tf = state.chartTF;
+  const metal = gold_gold_state.chartMetal;
+  const tf = gold_gold_state.chartTF;
   const cacheKey = `${metal}_${tf}`;
 
   // ── Cache lookup (instant switch between metals/timeframes) ──
@@ -2180,8 +2314,8 @@ function generateMockCandles(metal, tf) {
   const now = Math.floor(Date.now() / 1000);
   // Use price per troy ounce for chart
   const baseOz = metal === 'gold'
-    ? (state.goldPriceUSD ? state.goldPriceUSD * 31.1035 : 2320)
-    : (state.silverPriceUSD ? state.silverPriceUSD * 31.1035 : 29.5);
+    ? (gold_gold_state.goldPriceUSD ? gold_gold_state.goldPriceUSD * 31.1035 : 2320)
+    : (gold_gold_state.silverPriceUSD ? gold_gold_state.silverPriceUSD * 31.1035 : 29.5);
 
   const vol = metal === 'gold' ? 0.007 : 0.013;
   const intervalMap = { '60': 3600, 'D': 86400, 'W': 604800, 'M': 2592000 };
@@ -2259,7 +2393,7 @@ function calcLRChannel(candles, period) {
 // ===== END LEGACY CHART CODE =====
 
 function switchChartMetal(metal) {
-  state.chartMetal = metal;
+  gold_gold_state.chartMetal = metal;
   document.getElementById('btnChartGold').classList.toggle('active', metal === 'gold');
   document.getElementById('btnChartSilver').classList.toggle('active', metal === 'silver');
   renderTVChart();
@@ -2314,7 +2448,7 @@ document.getElementById('logoutModal').querySelector('.modal').addEventListener(
 document.getElementById('opMetal').addEventListener('change', () => {
   const m = document.getElementById('opMetal').value;
   const p = getLocalBuyPriceSAR(m);
-  if (p) document.getElementById('opBuyPrice').value = p.toFixed(2);
+  if (p) document.getElementById('opPrice').value = p.toFixed(2);
 });
 
 document.getElementById('sellMetal').addEventListener('change', updateSpreadDisplay);
@@ -2322,9 +2456,8 @@ document.getElementById('sellMetal').addEventListener('change', updateSpreadDisp
 // Check if already logged in (session)
 const session = sessionStorage.getItem('currentUser');
 if (session) {
-  state.currentUser = session;
-  loadState();
-  enterApp();
+  gold_gold_state.currentUser = session;
+  gold_gold_loadFromSupabase().then(() => enterApp());
 }
 
 // Restore saved username and password from localStorage
