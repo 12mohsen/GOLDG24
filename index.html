@@ -381,6 +381,16 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
               <div style="font-size:11px;color:var(--text3);font-weight:400;">appcreator24.com</div>
             </div>
           </a>
+
+          <!-- 📋 نسخ الروابط — الخيار الثالث -->
+          <div class="share-link" onclick="copyShareLinks()" style="cursor:pointer;">
+            <span class="s-icon">📋</span>
+            <div>
+              <div>نسخ الروابط</div>
+              <div style="font-size:11px;color:var(--text3);font-weight:400;" id="copyLinkStatus">المتصفح + APK</div>
+            </div>
+          </div>
+
         </div>
       </div>
       <div class="icon-btn" id="refreshBtn" onclick="gold_gold_fetchPrices()" title="تحديث الأسعار">↻</div>
@@ -2599,6 +2609,36 @@ function requireAuth() {
 }
 
 // ── Share Menu ──
+// 📋 نسخ روابط المشاركة إلى الحافظة
+function copyShareLinks() {
+  const text =
+    '🌐 محفظة المعادن الثمينة\n' +
+    '─────────────────────\n' +
+    '🌐 المتصفح: https://goldg24.netlify.app/\n' +
+    '📱 APK: https://www.appcreator24.com/app4024594-ste29j';
+  navigator.clipboard.writeText(text).then(() => {
+    const el = document.getElementById('copyLinkStatus');
+    el.textContent = '✅ تم النسخ!';
+    el.style.color = 'var(--green)';
+    setTimeout(() => {
+      el.textContent = 'المتصفح + APK';
+      el.style.color = '';
+    }, 2500);
+  }).catch(() => {
+    // fallback قديم
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const el = document.getElementById('copyLinkStatus');
+    el.textContent = '✅ تم النسخ!';
+    el.style.color = 'var(--green)';
+    setTimeout(() => { el.textContent = 'المتصفح + APK'; el.style.color = ''; }, 2500);
+  });
+}
+
 function toggleShareMenu() {
   const dd = document.getElementById('shareDropdown');
   dd.classList.toggle('open');
