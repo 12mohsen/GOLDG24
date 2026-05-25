@@ -45,7 +45,17 @@
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;}
 /* ── Auth ── */
-#authScreen{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px;}
+#authScreen{position:fixed;inset:0;background:rgba(0,0,0,0.80);display:none;align-items:center;justify-content:center;z-index:700;padding:16px;}
+#authScreen.open{display:flex;}
+.auth-modal-close{position:absolute;top:14px;left:14px;background:var(--bg4);border:none;color:var(--text2);cursor:pointer;font-size:18px;width:32px;height:32px;border-radius:7px;display:none;align-items:center;justify-content:center;transition:.2s;}
+.auth-modal-close:hover{color:var(--red);}
+.auth-box{position:relative;}
+/* guest topbar badge */
+.guest-badge{display:none;align-items:center;gap:8px;background:rgba(212,175,55,.1);border:1px solid var(--border);border-radius:9px;padding:6px 12px;cursor:pointer;color:var(--gold);font-size:13px;font-weight:700;transition:.2s;}
+.guest-badge:hover{background:rgba(212,175,55,.2);}
+/* require-auth overlay on action cards */
+.auth-overlay-banner{display:none;position:fixed;bottom:24px;right:50%;transform:translateX(50%);z-index:650;background:linear-gradient(135deg,var(--gold),var(--gold-dark));color:#000;border-radius:14px;padding:14px 24px;font-size:14px;font-weight:700;box-shadow:0 6px 24px rgba(0,0,0,0.5);text-align:center;cursor:pointer;}
+.auth-overlay-banner.show{display:block;animation:fadeIn .3s ease;}
 .auth-box{background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:40px 36px;width:100%;max-width:420px;box-shadow:var(--shadow);}
 .auth-logo{text-align:center;margin-bottom:32px;}
 .auth-logo .icon{font-size:48px;margin-bottom:12px;}
@@ -67,7 +77,7 @@ body{font-family:'Tajawal',sans-serif;background:var(--bg);color:var(--text);min
 .hint-box b{color:var(--gold);}
 .auth-err{color:var(--red);font-size:12px;margin-top:8px;display:none;}
 /* ── App Layout ── */
-#app{display:none;min-height:100vh;flex-direction:column;}
+#app{min-height:100vh;flex-direction:column;}
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 20px;height:60px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
 .topbar-logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--gold);}
 .topbar-logo span{font-size:24px;}
@@ -253,6 +263,14 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
 .empty-state{text-align:center;padding:30px;color:var(--text3);font-size:13px;}
 .empty-state .icon{font-size:36px;margin-bottom:8px;}
+
+/* ── Share Button ── */
+.share-wrap{position:relative;}
+.share-dropdown{position:absolute;top:44px;left:0;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:8px;min-width:210px;z-index:200;display:none;box-shadow:var(--shadow);flex-direction:column;gap:4px;}
+.share-dropdown.open{display:flex;}
+.share-link{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;text-decoration:none;color:var(--text);font-size:13px;font-weight:600;transition:.2s;border:1px solid transparent;}
+.share-link:hover{background:rgba(212,175,55,.1);border-color:var(--border);color:var(--gold);}
+.share-link .s-icon{font-size:18px;width:28px;text-align:center;}
 </style>
 <!-- Supabase REST API (no library needed) -->
 </head>
@@ -260,7 +278,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 
 <!-- ═══════════ AUTH SCREEN ═══════════ -->
 <div id="authScreen">
-  <div class="auth-box">
+  <div class="auth-box"><button class="auth-modal-close" id="authModalClose" onclick="closeAuthModal()">✕</button>
     <div class="auth-logo">
       <div class="icon">🏅</div>
       <h1>محفظة المعادن الثمينة</h1>
@@ -314,13 +332,13 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 </div>
 
 <!-- ═══════════ MAIN APP ═══════════ -->
-<div id="app" style="display:none">
+<div id="app" style="display:flex;flex-direction:column;">
 
   <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-logo">
       <span>🏅</span> محفظة المعادن
-      <span style="font-size:12px;color:var(--text);margin-right:15px;padding-right:15px;border-right:1px solid var(--border2);" id="usernameDisplay">--</span>
+      <span style="font-size:12px;color:var(--text);margin-right:15px;padding-right:15px;border-right:1px solid var(--border2);" id="usernameDisplay" >--</span><div class="guest-badge" id="guestBadge" onclick="openAuthModal()">🔑 دخول / تسجيل</div>
     </div>
     <div class="price-ticker" id="priceTicker">
       <div class="ticker-item">
@@ -336,6 +354,35 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       <div class="live-dot"></div>
     </div>
     <div class="topbar-actions">
+      <!-- ╔══════════════════════════════════════════════╗ -->
+      <!-- ║           زر المشاركة 📤                       ║ -->
+      <!-- ║  لتغيير الروابط عدّل السطرين أدناه فقط:        ║ -->
+      <!-- ║  رابط المتصفح  ← href الأول                   ║ -->
+      <!-- ║  رابط APK      ← href الثاني                  ║ -->
+      <!-- ╚══════════════════════════════════════════════╝ -->
+      <div class="share-wrap" id="shareWrap">
+        <div class="icon-btn" onclick="toggleShareMenu()" title="مشاركة التطبيق" style="color:var(--gold);">📤</div>
+        <div class="share-dropdown" id="shareDropdown">
+
+          <!-- 🌐 رابط فتح التطبيق في المتصفح — غيّر الرابط هنا -->
+          <a class="share-link" href="https://goldg24.netlify.app/" target="_blank" onclick="closeShareMenu()">
+            <span class="s-icon">🌐</span>
+            <div>
+              <div>فتح في المتصفح</div>
+              <div style="font-size:11px;color:var(--text3);font-weight:400;">goldg24.netlify.app</div>
+            </div>
+          </a>
+
+          <!-- 📱 رابط تحميل APK — غيّر الرابط هنا -->
+          <a class="share-link" href="https://www.appcreator24.com/app4024594-ste29j" target="_blank" onclick="closeShareMenu()">
+            <span class="s-icon">📱</span>
+            <div>
+              <div>تحميل تطبيق APK</div>
+              <div style="font-size:11px;color:var(--text3);font-weight:400;">appcreator24.com</div>
+            </div>
+          </a>
+        </div>
+      </div>
       <div class="icon-btn" id="refreshBtn" onclick="gold_gold_fetchPrices()" title="تحديث الأسعار">↻</div>
       <div class="icon-btn" onclick="toggleTheme()" title="الوضع الليلي/النهاري" id="themeBtn">🌙</div>
       <div class="icon-btn" onclick="openSettings()" title="الإعدادات">⚙️</div>
@@ -480,13 +527,13 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             </div>
             <div class="inp-group">
               <label>فرق الذهب (ريال/جم)</label>
-              <input type="number" id="spreadValue" value="5.95" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
+              <input type="number" id="spreadValue" value="6.09" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
             </div>
           </div>
           <div class="row2" style="margin-top:8px;">
             <div class="inp-group">
               <label>فرق الفضة (ريال/جم)</label>
-              <input type="number" id="spreadSilver" value="0.50" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
+              <input type="number" id="spreadSilver" value="0.02" min="0" step="0.01" oninput="saveSpreadSettings();gold_gold_recalcAll();">
             </div>
           </div>
           <div style="margin-top:10px;background:var(--bg3);border-radius:10px;padding:10px;font-size:12px;color:var(--text2);">
@@ -713,8 +760,8 @@ let gold_gold_state = {
   chartMetal: 'gold',
   chartTF: '60',
   spreadBank: 'alahli',
-  spreadValue: 5.95,
-  spreadSilver: 0.50,
+  spreadValue: 6.09,
+  spreadSilver: 0.02,
   storageFees: 0,
   serviceFeeRate: 10  // ريال لكل 100 جرام
 };
@@ -746,11 +793,11 @@ function daysLeftForDeleted(op) {
 
 const TROY_OZ_TO_GRAM = 31.1035;
 const BANK_SPREADS = {
-  alahli: { name: 'الأهلي', spread: 5.95 },
-  alrajhi: { name: 'الراجحي', spread: 5.95 },
-  albilad: { name: 'البلاد', spread: 5.95 },
-  other: { name: 'بنك آخر', spread: 5.95 },
-  manual: { name: 'تخصيص يدوي', spread: 5.95 }
+  alahli: { name: 'الأهلي', spread: 6.09 },
+  alrajhi: { name: 'الراجحي', spread: 6.09 },
+  albilad: { name: 'البلاد', spread: 6.09 },
+  other: { name: 'بنك آخر', spread: 6.09 },
+  manual: { name: 'تخصيص يدوي', spread: 6.09 }
 };
 
 // ═══════════════════════════════════════════
@@ -763,8 +810,8 @@ function gold_gold_resetState() {
   gold_gold_state.exchangeRate = 3.75;
   gold_gold_state.darkMode = true;
   gold_gold_state.spreadBank = 'alahli';
-  gold_gold_state.spreadValue = 5.95;
-  gold_gold_state.spreadSilver = 0.50;
+  gold_gold_state.spreadValue = 6.09;
+  gold_gold_state.spreadSilver = 0.02;
   gold_gold_state.storageFees = 0;
   gold_gold_state.serviceFeeRate = 10;
 }
@@ -857,8 +904,8 @@ async function gold_gold_loadFromSupabase() {
       gold_gold_state.exchangeRate = s.exchange_rate || 3.75;
       gold_gold_state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
       gold_gold_state.spreadBank = s.spread_bank || 'alahli';
-      gold_gold_state.spreadValue = s.spread_value !== undefined ? s.spread_value : 5.95;
-      gold_gold_state.spreadSilver = s.spread_silver !== undefined ? s.spread_silver : 0.50;
+      gold_gold_state.spreadValue = s.spread_value !== undefined ? s.spread_value : 6.09;
+      gold_gold_state.spreadSilver = s.spread_silver !== undefined ? s.spread_silver : 0.02;
       gold_gold_state.storageFees = s.storage_fees !== undefined ? s.storage_fees : 0;
       gold_gold_state.serviceFeeRate = s.service_fee_rate !== undefined ? s.service_fee_rate : 10;
     }
@@ -1030,17 +1077,21 @@ function confirmLogout() {
   // تصفير كامل للبيانات عند الخروج لمنع تسرب بيانات لمستخدم آخر
   gold_gold_state.currentUser = null;
   gold_gold_resetState();
-  document.getElementById('app').style.display = 'none';
-  document.getElementById('authScreen').style.display = 'flex';
   closeLogoutModal();
+  enterGuestMode();
 }
 
 function enterApp() {
   sessionStorage.setItem('currentUser', gold_gold_state.currentUser);
-  document.getElementById('authScreen').style.display = 'none';
+  closeAuthModal();
   document.getElementById('app').style.display = 'flex';
   document.getElementById('app').style.flexDirection = 'column';
   document.getElementById('usernameDisplay').textContent = gold_gold_state.currentUser;
+  document.getElementById('guestBadge').style.display = 'none';
+  const settingsBtn = document.querySelector('[onclick="openSettings()"]');
+  const logoutBtn = document.querySelector('[onclick="logout()"]');
+  if (settingsBtn) settingsBtn.style.display = '';
+  if (logoutBtn) logoutBtn.style.display = '';
   applyTheme();
   document.getElementById('exchangeRate').value = gold_gold_state.exchangeRate;
   document.getElementById('storageFees').value = gold_gold_state.storageFees;
@@ -1285,17 +1336,18 @@ function getLocalSellPriceSAR(metal) {
 function initSpreadSettings() {
   document.getElementById('spreadBank').value = gold_gold_state.spreadBank;
   document.getElementById('spreadValue').value = gold_gold_state.spreadValue;
-  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.50;
+  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.02;
   updateSpreadDisplay();
 }
 
 function selectSpreadBank() {
+  if (!requireAuth()) { initSpreadSettings(); return; }
   const bank = document.getElementById('spreadBank').value;
   gold_gold_state.spreadBank = bank;
   if (BANK_SPREADS[bank] && bank !== 'manual') {
     gold_gold_state.spreadValue = BANK_SPREADS[bank].spread;
     document.getElementById('spreadValue').value = gold_gold_state.spreadValue;
-  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.50;
+  document.getElementById('spreadSilver').value = gold_gold_state.spreadSilver !== undefined ? gold_gold_state.spreadSilver : 0.02;
   }
   gold_gold_saveState();
   updatePriceDisplay(gold_gold_state.goldPriceUSD, gold_gold_state.silverPriceUSD);
@@ -1303,6 +1355,7 @@ function selectSpreadBank() {
 }
 
 function saveSpreadSettings() {
+  if (!requireAuth()) { initSpreadSettings(); return; }
   gold_gold_state.spreadBank = document.getElementById('spreadBank').value;
   gold_gold_state.spreadValue = parseFloat(document.getElementById('spreadValue').value) || 0;
   gold_gold_state.spreadSilver = parseFloat(document.getElementById('spreadSilver').value) || 0;
@@ -1311,11 +1364,13 @@ function saveSpreadSettings() {
 }
 
 function saveStorageFees() {
+  if (!requireAuth()) return;
   gold_gold_state.storageFees = parseFloat(document.getElementById('storageFees').value) || 0;
   gold_gold_saveState();
 }
 
 function saveServiceFeeRate() {
+  if (!requireAuth()) return;
   gold_gold_state.serviceFeeRate = parseFloat(document.getElementById('serviceFeeRate').value);
   if (isNaN(gold_gold_state.serviceFeeRate) || gold_gold_state.serviceFeeRate < 0) gold_gold_state.serviceFeeRate = 0;
   gold_gold_saveState();
@@ -1354,6 +1409,7 @@ function updateSpreadDisplay() {
 }
 
 function saveExchangeRate() {
+  if (!requireAuth()) return;
   gold_gold_state.exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 3.75;
   updatePriceDisplay(gold_gold_state.goldPriceUSD, gold_gold_state.silverPriceUSD);
   gold_gold_saveState();
@@ -1408,6 +1464,7 @@ document.addEventListener('input', e => {
 });
 
 async function gold_addOperation() {
+  if (!requireAuth()) return;
   const metal = document.getElementById('opMetal').value;
   const grams = parseFloat(document.getElementById('opGrams').value);
   const price = parseFloat(document.getElementById('opPrice').value);
@@ -1437,6 +1494,7 @@ async function gold_addOperation() {
 }
 
 async function gold_deleteOp(id) {
+  if (!requireAuth()) return;
   if (!confirm('حذف هذه العملية؟')) return;
   const op = gold_gold_state.operations.find(o => o.id === id);
   gold_gold_state.operations = gold_gold_state.operations.filter(o => o.id !== id);
@@ -1599,6 +1657,7 @@ function closeOperationModal() {
 
 function enableEditOperation(id, e) {
   if (e) e.stopPropagation();
+  if (!requireAuth()) return;
   const modal = document.getElementById('operationModal');
   const isModalOpen = modal.classList.contains('open');
 
@@ -2420,7 +2479,7 @@ function showOnChart(metal) {
 // ═══════════════════════════════════════════
 //  SETTINGS
 // ═══════════════════════════════════════════
-function openSettings() { document.getElementById('settingsModal').classList.add('open'); }
+function openSettings() { if (!requireAuth()) return; document.getElementById('settingsModal').classList.add('open'); }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 
 // ═══════════════════════════════════════════
@@ -2465,17 +2524,99 @@ document.getElementById('opMetal').addEventListener('change', () => {
 document.getElementById('sellMetal').addEventListener('change', updateSpreadDisplay);
 
 // Check if already logged in (session)
-const session = sessionStorage.getItem('currentUser');
-if (session) {
-  gold_gold_state.currentUser = session;
-  gold_gold_loadFromSupabase().then(() => enterApp());
-}
-
-// Restore saved username and password from localStorage
+// استعادة اسم المستخدم المحفوظ
 const savedUsername = localStorage.getItem('savedUsername');
 const savedPassword = localStorage.getItem('savedPassword');
 if (savedUsername) document.getElementById('loginUser').value = savedUsername;
 if (savedPassword) document.getElementById('loginPass').value = savedPassword;
+
+const session = sessionStorage.getItem('currentUser');
+if (session) {
+  gold_gold_state.currentUser = session;
+  gold_gold_loadFromSupabase().then(() => enterApp());
+} else {
+  // وضع المشاهدة: أظهر التطبيق فوراً بدون تسجيل دخول
+  enterGuestMode();
+}
+
+
+// ══════════════════════════════════════════
+//  GUEST MODE — وضع المشاهدة
+// ══════════════════════════════════════════
+function enterGuestMode() {
+  gold_gold_state.currentUser = null;
+  applyTheme();
+  document.getElementById('usernameDisplay').textContent = 'زائر';
+  document.getElementById('guestBadge').style.display = 'flex';
+  // إخفاء أزرار خاصة بالمستخدم المسجّل
+  ['refreshBtn','themeBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
+  });
+  document.querySelector('[onclick="openSettings()"]').style.display = 'none';
+  document.querySelector('[onclick="logout()"]').style.display = 'none';
+  // تحميل الأسعار والشارت للجميع
+  gold_gold_fetchPrices();
+  gold_gold_renderHoldings();
+  gold_gold_recalcAll();
+  renderTVChart();
+  setInterval(gold_gold_fetchPrices, 60000);
+}
+
+function openAuthModal() {
+  closeShareMenu();
+  hideBanner();
+  const modal = document.getElementById('authScreen');
+  modal.classList.add('open');
+  // إظهار زر الإغلاق فقط إذا كنا داخل التطبيق (وضع زائر)
+  const closeBtn = document.getElementById('authModalClose');
+  if (closeBtn) closeBtn.style.display = 'flex';
+}
+
+function closeAuthModal() {
+  document.getElementById('authScreen').classList.remove('open');
+}
+
+let _bannerTimer = null;
+function showAuthBanner() {
+  const b = document.getElementById('authPromptBanner');
+  b.classList.add('show');
+  clearTimeout(_bannerTimer);
+  _bannerTimer = setTimeout(() => b.classList.remove('show'), 4000);
+}
+function hideBanner() {
+  const b = document.getElementById('authPromptBanner');
+  if (b) b.classList.remove('show');
+}
+
+// الحارس — يُعاد false إذا لم يكن المستخدم مسجّلاً
+function requireAuth() {
+  if (!gold_gold_state.currentUser) {
+    showAuthBanner();
+    return false;
+  }
+  return true;
+}
+
+// ── Share Menu ──
+function toggleShareMenu() {
+  const dd = document.getElementById('shareDropdown');
+  dd.classList.toggle('open');
+}
+function closeShareMenu() {
+  document.getElementById('shareDropdown').classList.remove('open');
+}
+// Close when clicking outside
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('shareWrap');
+  if (wrap && !wrap.contains(e.target)) closeShareMenu();
+});
 </script>
+
+<!-- ═══════════ AUTH PROMPT BANNER ═══════════ -->
+<div class="auth-overlay-banner" id="authPromptBanner" onclick="openAuthModal()">
+  🔑 سجّل الدخول لاستخدام هذه الميزة — اضغط للتسجيل
+</div>
+
 </body>
 </html>
