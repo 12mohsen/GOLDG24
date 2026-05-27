@@ -1463,8 +1463,19 @@ function updateAvgInfo() {
   const newTotalCost = totalCost + newGrams * newPrice;
   const newAvg = newTotalGrams > 0 ? newTotalCost / newTotalGrams : newPrice;
 
+  // 💰 القيمة الإجمالية للعملية الحالية (الكمية × السعر)
+  const operationTotal = newGrams * newPrice;
+  const isBuy = opType === 'buy';
+  const opLabel = isBuy ? 'إجمالي قيمة الشراء' : 'إجمالي قيمة البيع';
+  const opColor = isBuy ? 'var(--green)' : 'var(--red)';
+  const opIcon  = isBuy ? '🛒' : '💵';
+
   box.style.display = 'block';
   box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:rgba(212,175,55,0.08);border-radius:8px;margin-bottom:10px;border-right:3px solid ${opColor};">
+      <span style="font-weight:700;color:var(--text);font-size:13px;">${opIcon} ${opLabel}:</span>
+      <b class="num" style="font-size:16px;color:${opColor};font-weight:900;">${fmt(operationTotal,2)} SAR</b>
+    </div>
     إجمالي الكمية بعد الإضافة: <b>${fmt(newTotalGrams,3)} جم</b> &nbsp;|&nbsp;
     متوسط التكلفة الجديد: <b class="gold-c">${fmt(newAvg,2)} SAR/جم</b>
   `;
