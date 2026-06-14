@@ -264,6 +264,18 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 .empty-state{text-align:center;padding:30px;color:var(--text3);font-size:13px;}
 .empty-state .icon{font-size:36px;margin-bottom:8px;}
 
+/* ── Biometric / Fingerprint ── */
+.biometric-btn{width:100%;padding:13px;border:1.5px solid var(--gold);border-radius:10px;font-family:'Tajawal',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:.2s;background:rgba(212,175,55,0.08);color:var(--gold);display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;}
+.biometric-btn:hover{background:rgba(212,175,55,0.18);transform:translateY(-1px);}
+.biometric-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
+.biometric-divider{display:flex;align-items:center;gap:10px;margin:12px 0;color:var(--text3);font-size:12px;}
+.biometric-divider::before,.biometric-divider::after{content:'';flex:1;height:1px;background:var(--border2);}
+.biometric-pulse{animation:bioPulse 1.5s ease-in-out infinite;}
+@keyframes bioPulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.6;transform:scale(1.15);}}
+.bio-setup-banner{background:rgba(212,175,55,0.1);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:10px;font-size:13px;color:var(--text2);display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.bio-setup-banner button{background:var(--gold);border:none;color:#000;border-radius:7px;padding:6px 12px;font-family:'Tajawal',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.bio-setup-banner button:hover{opacity:.85;}
+
 /* ── Share Button ── */
 .share-wrap{position:relative;}
 .share-dropdown{position:absolute;top:44px;left:0;background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:8px;min-width:210px;z-index:200;display:none;box-shadow:var(--shadow);flex-direction:column;gap:4px;}
@@ -301,6 +313,10 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
       <div class="auth-err" id="loginErr"></div>
       <button class="btn btn-gold" onclick="doLogin()">دخول</button>
+      <div class="biometric-divider" id="bioDivider" style="display:none;">أو</div>
+      <button class="biometric-btn" id="bioLoginBtn" onclick="doBiometricLogin()" style="display:none;">
+        <span id="bioLoginIcon">🫆</span> <span id="bioLoginText">الدخول بالبصمة</span>
+      </button>
       <button class="btn btn-outline" onclick="showHint()">🔑 نسيت كلمة المرور؟</button>
       <div class="hint-box" id="hintBox">
         <b>تلميح كلمة المرور:</b> <span id="hintText"></span>
@@ -669,6 +685,16 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
         <div class="setting-sub" style="color:var(--red)">لا يمكن التراجع عن هذا الإجراء</div>
       </div>
       <button onclick="clearAllData()" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:7px 14px;border-radius:8px;cursor:pointer;font-family:'Tajawal',sans-serif;font-size:13px;">حذف الكل</button>
+    </div>
+    <!-- ── Biometric Section ── -->
+    <div class="setting-row" style="border-bottom:none;padding-bottom:0;">
+      <div>
+        <div class="setting-label">🫆 تسجيل الدخول بالبصمة</div>
+        <div class="setting-sub">دخول سريع بدون كلمة مرور</div>
+      </div>
+    </div>
+    <div id="bioSettingsSection" style="padding:8px 0 4px;">
+      <div style="color:var(--text3);font-size:13px;">جاري التحقق من دعم الجهاز...</div>
     </div>
   </div>
 </div>
@@ -1112,6 +1138,8 @@ function enterApp() {
   gold_gold_recalcAll();
   renderTVChart();
   setInterval(gold_gold_fetchPrices, 60000);
+  // ── بانر البصمة للمستخدمين الجدد ──
+  setTimeout(() => bioShowEnrollBanner(gold_gold_state.currentUser), 1500);
 }
 
 async function changePassword() {
@@ -2500,7 +2528,7 @@ function showOnChart(metal) {
 // ═══════════════════════════════════════════
 //  SETTINGS
 // ═══════════════════════════════════════════
-function openSettings() { if (!requireAuth()) return; document.getElementById('settingsModal').classList.add('open'); }
+function openSettings() { if (!requireAuth()) return; document.getElementById('settingsModal').classList.add('open'); bioRefreshSettingsSection(); }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 
 // ═══════════════════════════════════════════
@@ -2509,6 +2537,322 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 function fmt(n, decimals = 2) {
   if (n === null || n === undefined || isNaN(n)) return '--';
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+// ══════════════════════════════════════════
+//  BIOMETRIC AUTH — تسجيل الدخول بالبصمة
+// ══════════════════════════════════════════
+
+const BIO_STORE_KEY = 'bio_credentials_v1'; // localStorage key
+
+// ─── هل يدعم الجهاز WebAuthn ؟ ───
+function isBiometricSupported() {
+  return !!(window.PublicKeyCredential &&
+    typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === 'function');
+}
+
+// ─── تحميل بيانات البصمة المحفوظة ───
+function bioGetAll() {
+  try { return JSON.parse(localStorage.getItem(BIO_STORE_KEY) || '{}'); } catch { return {}; }
+}
+function bioSaveAll(data) {
+  localStorage.setItem(BIO_STORE_KEY, JSON.stringify(data));
+}
+function bioHasCredential(username) {
+  if (!username) return false;
+  const all = bioGetAll();
+  return !!(all[username] && all[username].credentialId);
+}
+function bioGetCredential(username) {
+  return bioGetAll()[username] || null;
+}
+function bioSaveCredential(username, credData) {
+  const all = bioGetAll();
+  all[username] = credData;
+  bioSaveAll(all);
+}
+function bioRemoveCredential(username) {
+  const all = bioGetAll();
+  delete all[username];
+  bioSaveAll(all);
+}
+
+// ─── تحديث واجهة زر البصمة في شاشة الدخول ───
+function bioRefreshLoginUI() {
+  if (!isBiometricSupported()) return;
+  const savedUsername = localStorage.getItem('savedUsername') || '';
+  const hasCred = bioHasCredential(savedUsername);
+  const divider = document.getElementById('bioDivider');
+  const btn = document.getElementById('bioLoginBtn');
+  if (hasCred && savedUsername) {
+    if (divider) divider.style.display = 'flex';
+    if (btn) {
+      btn.style.display = 'flex';
+      btn.querySelector('#bioLoginText').textContent = `الدخول بالبصمة (${savedUsername})`;
+    }
+  } else {
+    if (divider) divider.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+  }
+}
+
+// ─── تشغيل عند تحميل الصفحة وعند تغيير حقل المستخدم ───
+document.addEventListener('DOMContentLoaded', () => {
+  bioRefreshLoginUI();
+});
+document.getElementById('loginUser').addEventListener('input', () => {
+  const val = document.getElementById('loginUser').value.trim();
+  const hasCred = bioHasCredential(val);
+  const divider = document.getElementById('bioDivider');
+  const btn = document.getElementById('bioLoginBtn');
+  if (hasCred && val && isBiometricSupported()) {
+    if (divider) divider.style.display = 'flex';
+    if (btn) { btn.style.display = 'flex'; btn.querySelector('#bioLoginText').textContent = `الدخول بالبصمة (${val})`; }
+  } else {
+    if (divider) divider.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+  }
+});
+
+// ─── تسجيل البصمة (Enrollment) بعد تسجيل الدخول بكلمة المرور ───
+async function bioEnroll(username) {
+  if (!isBiometricSupported()) {
+    alert('❌ جهازك لا يدعم تسجيل الدخول بالبصمة');
+    return false;
+  }
+  try {
+    const supRes = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    if (!supRes) {
+      alert('❌ لا يوجد قارئ بصمة أو وجه على هذا الجهاز');
+      return false;
+    }
+
+    const userId = new TextEncoder().encode(username + '_goldapp');
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: 'محفظة المعادن الثمينة', id: location.hostname || 'localhost' },
+        user: { id: userId, name: username, displayName: username },
+        pubKeyCredParams: [
+          { type: 'public-key', alg: -7 },   // ES256
+          { type: 'public-key', alg: -257 }  // RS256
+        ],
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          userVerification: 'required',
+          requireResidentKey: false
+        },
+        timeout: 60000,
+        attestation: 'none'
+      }
+    });
+
+    if (!credential) return false;
+
+    // حفظ معرف الاعتماد فقط (لا نحتاج المفتاح العام للتحقق الأساسي)
+    const credId = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
+    bioSaveCredential(username, { credentialId: credId, username, enrolledAt: Date.now() });
+    return true;
+
+  } catch (e) {
+    console.warn('Biometric enroll error:', e);
+    if (e.name === 'NotAllowedError') return null; // المستخدم رفض
+    return false;
+  }
+}
+
+// ─── التحقق بالبصمة (Verification) ───
+async function bioVerify(username) {
+  const cred = bioGetCredential(username);
+  if (!cred || !cred.credentialId) return false;
+
+  try {
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const rawId = Uint8Array.from(atob(cred.credentialId), c => c.charCodeAt(0));
+
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        rpId: location.hostname || 'localhost',
+        allowCredentials: [{ type: 'public-key', id: rawId }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+
+    return !!assertion;
+  } catch (e) {
+    console.warn('Biometric verify error:', e);
+    return false;
+  }
+}
+
+// ─── الدخول بالبصمة (زر البصمة في شاشة تسجيل الدخول) ───
+async function doBiometricLogin() {
+  const savedUser = document.getElementById('loginUser').value.trim() || localStorage.getItem('savedUsername');
+  if (!savedUser) {
+    alert('أدخل اسم المستخدم أولاً ثم حاول مجدداً');
+    return;
+  }
+  if (!bioHasCredential(savedUser)) {
+    alert('لا توجد بصمة مسجّلة لهذا الحساب. سجّل الدخول بكلمة المرور أولاً ثم سجّل البصمة من الإعدادات.');
+    return;
+  }
+
+  const btn = document.getElementById('bioLoginBtn');
+  const icon = document.getElementById('bioLoginIcon');
+  btn.disabled = true;
+  icon.classList.add('biometric-pulse');
+
+  try {
+    const ok = await bioVerify(savedUser);
+    if (ok) {
+      // تحقق ناجح → سجّل الدخول مباشرةً بدون كلمة مرور
+      const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(savedUser)}`);
+      if (!accounts || accounts.length === 0) {
+        alert('❌ المستخدم غير موجود في قاعدة البيانات');
+        return;
+      }
+      gold_gold_state.currentUser = savedUser;
+      await gold_gold_loadFromSupabase();
+      enterApp();
+      // حفظ الجلسة
+      sessionStorage.setItem('currentUser', savedUser);
+    } else {
+      const err = document.getElementById('loginErr');
+      showErr(err, '❌ فشل التحقق بالبصمة، حاول مجدداً');
+    }
+  } catch (e) {
+    console.error('Bio login error:', e);
+    const err = document.getElementById('loginErr');
+    showErr(err, '❌ تعذر التحقق بالبصمة');
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('biometric-pulse');
+    bioRefreshLoginUI();
+  }
+}
+
+// ─── عرض بانر تسجيل البصمة بعد الدخول بكلمة المرور ───
+async function bioShowEnrollBanner(username) {
+  if (!isBiometricSupported()) return;
+  if (bioHasCredential(username)) return; // مسجّل مسبقاً
+  try {
+    const ok = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    if (!ok) return;
+  } catch { return; }
+
+  // أظهر بانر في أعلى اللوحة اليسرى
+  const existing = document.getElementById('bioEnrollBanner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'bioEnrollBanner';
+  banner.className = 'bio-setup-banner fade-in';
+  banner.innerHTML = `
+    <span>🫆 سجّل بصمتك للدخول السريع في المرات القادمة</span>
+    <div style="display:flex;gap:6px;">
+      <button onclick="bioStartEnroll()">تسجيل البصمة</button>
+      <button onclick="document.getElementById('bioEnrollBanner').remove()" style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2);">لاحقاً</button>
+    </div>
+  `;
+  const leftPanel = document.querySelector('.left-panel');
+  if (leftPanel) leftPanel.prepend(banner);
+}
+
+// ─── بدء تسجيل البصمة عند الضغط على الزر ───
+async function bioStartEnroll() {
+  const banner = document.getElementById('bioEnrollBanner');
+  const username = gold_gold_state.currentUser;
+  if (!username) return;
+
+  if (banner) banner.innerHTML = `<span class="biometric-pulse">🫆 ضع إصبعك على قارئ البصمة...</span>`;
+
+  const result = await bioEnroll(username);
+
+  if (result === true) {
+    if (banner) banner.innerHTML = `<span style="color:var(--green);">✅ تم تسجيل البصمة بنجاح! يمكنك الآن الدخول بالبصمة في المرة القادمة.</span>`;
+    setTimeout(() => banner && banner.remove(), 3000);
+    bioRefreshLoginUI();
+    // تحديث الإعدادات إن كانت مفتوحة
+    bioRefreshSettingsSection();
+  } else if (result === null) {
+    if (banner) banner.innerHTML = `<span style="color:var(--text3);">تم الإلغاء. يمكنك التسجيل لاحقاً من الإعدادات.</span>`;
+    setTimeout(() => banner && banner.remove(), 2500);
+  } else {
+    if (banner) banner.innerHTML = `<span style="color:var(--red);">❌ فشل التسجيل. تأكد من دعم الجهاز للبصمة وأن المتصفح لديه الإذن.</span>`;
+    setTimeout(() => banner && banner.remove(), 3500);
+  }
+}
+
+// ─── قسم البصمة داخل الإعدادات ───
+function bioRefreshSettingsSection() {
+  const container = document.getElementById('bioSettingsSection');
+  if (!container) return;
+  const username = gold_gold_state.currentUser;
+  const hasCred = bioHasCredential(username);
+  const supported = isBiometricSupported();
+
+  if (!supported) {
+    container.innerHTML = `<div style="color:var(--text3);font-size:13px;">⚠️ جهازك أو متصفحك لا يدعم تسجيل الدخول بالبصمة</div>`;
+    return;
+  }
+
+  if (hasCred) {
+    const cred = bioGetCredential(username);
+    const date = cred.enrolledAt ? new Date(cred.enrolledAt).toLocaleDateString('ar-SA') : '';
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="font-size:13px;color:var(--green);">✅ البصمة مسجّلة${date ? ' منذ ' + date : ''}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-outline" style="padding:8px 14px;font-size:13px;flex:1;" onclick="bioReEnroll()">🔄 إعادة تسجيل البصمة</button>
+          <button class="btn btn-outline" style="padding:8px 14px;font-size:13px;flex:1;border-color:var(--red);color:var(--red);" onclick="bioRemove()">🗑️ حذف البصمة</button>
+        </div>
+      </div>
+    `;
+  } else {
+    container.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <div style="font-size:13px;color:var(--text3);">لم يتم تسجيل بصمة بعد</div>
+        <button class="biometric-btn" style="margin-top:0;" onclick="bioStartEnrollFromSettings()">🫆 تسجيل البصمة الآن</button>
+      </div>
+    `;
+  }
+}
+
+async function bioStartEnrollFromSettings() {
+  const username = gold_gold_state.currentUser;
+  const container = document.getElementById('bioSettingsSection');
+  if (!username || !container) return;
+
+  container.innerHTML = `<div class="biometric-pulse" style="font-size:14px;color:var(--gold);">🫆 ضع إصبعك على قارئ البصمة...</div>`;
+
+  const result = await bioEnroll(username);
+  if (result === true) {
+    bioRefreshSettingsSection();
+    bioRefreshLoginUI();
+  } else if (result === null) {
+    bioRefreshSettingsSection();
+  } else {
+    container.innerHTML = `<div style="color:var(--red);font-size:13px;">❌ فشل التسجيل. تأكد من دعم الجهاز.</div>`;
+    setTimeout(() => bioRefreshSettingsSection(), 3000);
+  }
+}
+
+async function bioReEnroll() {
+  bioRemoveCredential(gold_gold_state.currentUser);
+  await bioStartEnrollFromSettings();
+}
+
+function bioRemove() {
+  if (!confirm('هل تريد حذف بصمتك؟ ستحتاج لكلمة المرور للدخول مجدداً.')) return;
+  bioRemoveCredential(gold_gold_state.currentUser);
+  bioRefreshSettingsSection();
+  bioRefreshLoginUI();
+  const banner = document.getElementById('bioEnrollBanner');
+  if (banner) banner.remove();
 }
 
 // Close modal on outside click
@@ -2550,6 +2894,8 @@ const savedUsername = localStorage.getItem('savedUsername');
 const savedPassword = localStorage.getItem('savedPassword');
 if (savedUsername) document.getElementById('loginUser').value = savedUsername;
 if (savedPassword) document.getElementById('loginPass').value = savedPassword;
+// تحديث زر البصمة إذا كان هناك حساب محفوظ
+bioRefreshLoginUI();
 
 const session = sessionStorage.getItem('currentUser');
 if (session) {
