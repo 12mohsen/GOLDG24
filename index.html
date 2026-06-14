@@ -264,6 +264,27 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
 .empty-state{text-align:center;padding:30px;color:var(--text3);font-size:13px;}
 .empty-state .icon{font-size:36px;margin-bottom:8px;}
 
+/* ── Quick Login (Saved Accounts) ── */
+#quickLoginSection{margin-bottom:18px;}
+.quick-login-title{font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
+.quick-accounts{display:flex;flex-direction:column;gap:8px;}
+.quick-account-card{display:flex;align-items:center;gap:12px;background:var(--bg4);border:1px solid var(--border2);border-radius:11px;padding:10px 13px;cursor:pointer;transition:.2s;position:relative;}
+.quick-account-card:hover{border-color:var(--gold);background:rgba(212,175,55,0.06);}
+.quick-account-card:active{transform:scale(.98);}
+.quick-acc-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--gold),var(--gold-dark));display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:#000;flex-shrink:0;}
+.quick-acc-info{flex:1;min-width:0;}
+.quick-acc-name{font-size:14px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.quick-acc-sub{font-size:11px;color:var(--text3);margin-top:2px;}
+.quick-acc-actions{display:flex;align-items:center;gap:6px;}
+.quick-acc-bio{background:none;border:none;font-size:20px;cursor:pointer;padding:4px;border-radius:7px;transition:.15s;line-height:1;}
+.quick-acc-bio:hover{background:rgba(212,175,55,.15);}
+.quick-acc-remove{background:none;border:none;font-size:14px;cursor:pointer;padding:4px 6px;border-radius:7px;color:var(--text3);transition:.15s;line-height:1;}
+.quick-acc-remove:hover{background:rgba(239,68,68,.15);color:var(--red);}
+.quick-acc-arrow{color:var(--text3);font-size:16px;margin-right:2px;}
+.quick-divider{display:flex;align-items:center;gap:10px;color:var(--text3);font-size:12px;margin:14px 0 10px;}
+.quick-divider::before,.quick-divider::after{content:'';flex:1;height:1px;background:var(--border2);}
+.quick-login-spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-left:6px;}
+
 /* ── Biometric / Fingerprint ── */
 .biometric-btn{width:100%;padding:13px;border:1.5px solid var(--gold);border-radius:10px;font-family:'Tajawal',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:.2s;background:rgba(212,175,55,0.08);color:var(--gold);display:flex;align-items:center;justify-content:center;gap:8px;margin-top:10px;}
 .biometric-btn:hover{background:rgba(212,175,55,0.18);transform:translateY(-1px);}
@@ -296,6 +317,9 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       <h1>محفظة المعادن الثمينة</h1>
       <p>إدارة ذكية للذهب والفضة</p>
     </div>
+    <!-- Quick Login — حسابات سريعة -->
+    <div id="quickLoginSection" style="display:none;"></div>
+
     <div class="auth-tabs">
       <div class="auth-tab active" onclick="switchTab('login')">تسجيل الدخول</div>
       <div class="auth-tab" onclick="switchTab('register')">إنشاء حساب</div>
@@ -1027,6 +1051,7 @@ async function doLogin() {
     if (accounts[0].pass_hash !== btoa(pass)) { showErr(err,'كلمة المرور غير صحيحة'); return; }
     err.style.display = 'none';
     gold_gold_state.currentUser = user;
+    qlAdd(user); // حفظ في الدخول السريع
     await gold_gold_loadFromSupabase();
     enterApp();
   } catch (e) {
@@ -2540,6 +2565,127 @@ function fmt(n, decimals = 2) {
 }
 
 // ══════════════════════════════════════════
+//  QUICK LOGIN — الدخول السريع
+// ══════════════════════════════════════════
+
+const QUICK_ACCOUNTS_KEY = 'quick_accounts_v1'; // localStorage
+
+// ─── إدارة قائمة الحسابات السريعة ───
+function qlGetAll() {
+  try { return JSON.parse(localStorage.getItem(QUICK_ACCOUNTS_KEY) || '[]'); } catch { return []; }
+}
+function qlSaveAll(arr) {
+  localStorage.setItem(QUICK_ACCOUNTS_KEY, JSON.stringify(arr));
+}
+function qlHas(username) {
+  return qlGetAll().some(a => a.username === username);
+}
+function qlAdd(username) {
+  const all = qlGetAll().filter(a => a.username !== username);
+  all.unshift({ username, lastLogin: Date.now() });
+  qlSaveAll(all.slice(0, 5)); // أقصى 5 حسابات
+}
+function qlRemove(username) {
+  qlSaveAll(qlGetAll().filter(a => a.username !== username));
+}
+function qlUpdateLastLogin(username) {
+  const all = qlGetAll();
+  const idx = all.findIndex(a => a.username === username);
+  if (idx !== -1) { all[idx].lastLogin = Date.now(); qlSaveAll(all); }
+}
+
+// ─── تحديث واجهة الحسابات السريعة ───
+function qlRender() {
+  const section = document.getElementById('quickLoginSection');
+  if (!section) return;
+  const accounts = qlGetAll();
+  if (!accounts.length) { section.style.display = 'none'; return; }
+
+  const hasBio = isBiometricSupported();
+
+  const cards = accounts.map(acc => {
+    const initial = acc.username.charAt(0).toUpperCase();
+    const lastDate = acc.lastLogin ? new Date(acc.lastLogin).toLocaleDateString('ar-SA') : '';
+    const hasCred = hasBio && bioHasCredential(acc.username);
+    const bioBtn = hasCred
+      ? `<button class="quick-acc-bio" title="دخول بالبصمة" onclick="event.stopPropagation();qlBioLogin('${acc.username}')">🫆</button>`
+      : '';
+    return `
+      <div class="quick-account-card" onclick="qlSelectAccount('${acc.username}')">
+        <div class="quick-acc-avatar">${initial}</div>
+        <div class="quick-acc-info">
+          <div class="quick-acc-name">${acc.username}</div>
+          <div class="quick-acc-sub">${lastDate ? 'آخر دخول: ' + lastDate : 'حساب محفوظ'}${hasCred ? ' · 🫆' : ''}</div>
+        </div>
+        <div class="quick-acc-actions">
+          ${bioBtn}
+          <button class="quick-acc-remove" title="إزالة من القائمة" onclick="event.stopPropagation();qlRemoveAccount('${acc.username}')">✕</button>
+          <span class="quick-acc-arrow">‹</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  section.style.display = 'block';
+  section.innerHTML = `
+    <div class="quick-login-title">⚡ دخول سريع</div>
+    <div class="quick-accounts">${cards}</div>
+    <div class="quick-divider">أو أدخل حساباً آخر</div>
+  `;
+}
+
+// ─── اختيار حساب من القائمة السريعة ───
+function qlSelectAccount(username) {
+  document.getElementById('loginUser').value = username;
+  document.getElementById('loginPass').value = localStorage.getItem('savedPassword') || '';
+  document.getElementById('loginPass').focus();
+  bioRefreshLoginUI();
+  // تمرير لأسفل لرؤية حقل كلمة المرور
+  document.getElementById('loginPass').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ─── دخول مباشر بالبصمة من بطاقة الحساب السريع ───
+async function qlBioLogin(username) {
+  if (!bioHasCredential(username)) return;
+
+  // أظهر مؤشر تحميل مؤقت
+  const cards = document.querySelectorAll('.quick-account-card');
+  cards.forEach(c => c.style.pointerEvents = 'none');
+
+  const section = document.getElementById('quickLoginSection');
+  const tempMsg = document.createElement('div');
+  tempMsg.style.cssText = 'text-align:center;padding:10px;font-size:14px;color:var(--gold);font-weight:700;';
+  tempMsg.innerHTML = `🫆 جاري التحقق من البصمة... <span class="quick-login-spinner"></span>`;
+  section.appendChild(tempMsg);
+
+  try {
+    const ok = await bioVerify(username);
+    if (ok) {
+      const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(username)}`);
+      if (!accounts || !accounts.length) {
+        tempMsg.innerHTML = `<span style="color:var(--red);">❌ المستخدم غير موجود</span>`;
+        return;
+      }
+      gold_gold_state.currentUser = username;
+      qlUpdateLastLogin(username);
+      await gold_gold_loadFromSupabase();
+      enterApp();
+    } else {
+      tempMsg.innerHTML = `<span style="color:var(--red);">❌ فشل التحقق، حاول مجدداً</span>`;
+      setTimeout(() => { tempMsg.remove(); cards.forEach(c => c.style.pointerEvents = ''); }, 2000);
+    }
+  } catch (e) {
+    tempMsg.innerHTML = `<span style="color:var(--red);">❌ خطأ في البصمة</span>`;
+    setTimeout(() => { tempMsg.remove(); cards.forEach(c => c.style.pointerEvents = ''); }, 2000);
+  }
+}
+
+// ─── إزالة حساب من القائمة السريعة ───
+function qlRemoveAccount(username) {
+  qlRemove(username);
+  qlRender();
+}
+
+// ══════════════════════════════════════════
 //  BIOMETRIC AUTH — تسجيل الدخول بالبصمة
 // ══════════════════════════════════════════
 
@@ -2716,6 +2862,7 @@ async function doBiometricLogin() {
         return;
       }
       gold_gold_state.currentUser = savedUser;
+      qlAdd(savedUser); // حفظ في الدخول السريع
       await gold_gold_loadFromSupabase();
       enterApp();
       // حفظ الجلسة
@@ -2896,10 +3043,13 @@ if (savedUsername) document.getElementById('loginUser').value = savedUsername;
 if (savedPassword) document.getElementById('loginPass').value = savedPassword;
 // تحديث زر البصمة إذا كان هناك حساب محفوظ
 bioRefreshLoginUI();
+// عرض الحسابات السريعة
+qlRender();
 
 const session = sessionStorage.getItem('currentUser');
 if (session) {
   gold_gold_state.currentUser = session;
+  qlUpdateLastLogin(session);
   gold_gold_loadFromSupabase().then(() => enterApp());
 } else {
   // وضع المشاهدة: أظهر التطبيق فوراً بدون تسجيل دخول
@@ -2938,6 +3088,9 @@ function openAuthModal() {
   // إظهار زر الإغلاق فقط إذا كنا داخل التطبيق (وضع زائر)
   const closeBtn = document.getElementById('authModalClose');
   if (closeBtn) closeBtn.style.display = 'flex';
+  // تحديث الحسابات السريعة
+  qlRender();
+  bioRefreshLoginUI();
 }
 
 function closeAuthModal() {
