@@ -2738,12 +2738,25 @@ document.addEventListener('click', function(e) {
 // ═══════════════════════════════════════════
 //  PRICE-EXPLOSION PREDICTOR ENGINE  (added)
 // ═══════════════════════════════════════════
-const GOLDPX = { cache:{}, ttl: 15*60*1000 };
+const GOLDPX = { cache:{}, ttl: 15*60*1000, ohlcTtl: 6*60*60*1000 };
+
+// ── persistent OHLC cache (localStorage) ─ يجعل التحميل فورياً عند إعادة الفتح ──
+function goldpx_ohlcKey(metal){ return 'goldpx_ohlc_'+metal; }
+function goldpx_saveOHLC(metal, data){
+  try{ localStorage.setItem(goldpx_ohlcKey(metal), JSON.stringify({t:Date.now(), d:data})); }catch(e){}
+}
+function goldpx_loadOHLC(metal){
+  try{ const s=localStorage.getItem(goldpx_ohlcKey(metal)); return s?JSON.parse(s):null; }catch(e){ return null; }
+}
 
 function goldpx_fetchTO(url, ms){
-  ms=ms||8000;
+  ms=ms||6000;
+  const ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  const to = setTimeout(()=>{ if(ctrl) try{ctrl.abort();}catch(e){} }, ms);
   return Promise.race([
-    fetch(url).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); }),
+    fetch(url, ctrl?{signal:ctrl.signal}:undefined)
+      .then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); })
+      .finally(()=>clearTimeout(to)),
     new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), ms))
   ]);
 }
@@ -2796,6 +2809,31 @@ function goldpx_parseStooq(txt){
   if(c.length<60) throw new Error('short');
   return {candles:c.slice(-400), hasVolume:false, source:'Stooq'};
 }
+// ── المصدر الأساسي: دالة Supabase السيرفرية (بلا CORS/بروكسي/مفتاح) ──
+function goldpx_parseEdge(j){
+  if(!j || !j.candles || !j.candles.length) throw new Error((j&&j.error)||'edge no data');
+  const c=[];
+  for(const x of j.candles){
+    const o=+x.o,h=+x.h,l=+x.l,cl=+x.c,v=+(x.v||0);
+    if([o,h,l,cl].some(n=>isNaN(n)||n<=0)) continue;
+    c.push({o:o,h:h,l:l,c:cl,v:isNaN(v)?0:v});
+  }
+  if(c.length<60) throw new Error('edge short');
+  return {candles:c, hasVolume:c.slice(-30).some(x=>x.v>0), source:j.source||'Supabase'};
+}
+function goldpx_fetchEdge(metal, ms){
+  ms=ms||9000;
+  const url=SUPABASE_URL+'/functions/v1/ohlc?metal='+encodeURIComponent(metal);
+  const ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+  const to=setTimeout(()=>{ if(ctrl) try{ctrl.abort();}catch(e){} }, ms);
+  return Promise.race([
+    fetch(url,{ headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer '+SUPABASE_KEY }, signal: ctrl?ctrl.signal:undefined })
+      .then(r=>{ if(!r.ok) throw new Error('edge HTTP '+r.status); return r.json(); })
+      .then(goldpx_parseEdge)
+      .finally(()=>clearTimeout(to)),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error('edge timeout')), ms))
+  ]);
+}
 async function goldpx_fetchOHLC(metal){
   const ySym=metal==='gold'?'GC=F':'SI=F';
   const sSym=metal==='gold'?'xauusd':'xagusd';
@@ -2803,16 +2841,18 @@ async function goldpx_fetchOHLC(metal){
   const yB='https://query2.finance.yahoo.com/v8/finance/chart/'+ySym+'?range=2y&interval=1d';
   const st='https://stooq.com/q/d/l/?s='+sSym+'&i=d';
   const tasks=[];
+  // المصدر الأساسي: دالة Supabase السيرفرية — الأسرع والأكثر موثوقية
+  tasks.push(goldpx_fetchEdge(metal));
   const _key=goldpx_getKey();
   if(_key){
     const tdSym=metal==='gold'?'XAU/USD':'XAG/USD';
     const tdUrl='https://api.twelvedata.com/time_series?symbol='+encodeURIComponent(tdSym)+'&interval=1day&outputsize=400&apikey='+encodeURIComponent(_key);
     tasks.push(goldpx_fetchTO(tdUrl,9000).then(goldpx_parseTwelve));
   }
-  goldpx_proxies(yA).forEach(u=>tasks.push(goldpx_fetchTO(u,8000).then(goldpx_parseYahoo)));
-  goldpx_proxies(yB).forEach(u=>tasks.push(goldpx_fetchTO(u,8000).then(goldpx_parseYahoo)));
-  goldpx_proxies(st).forEach(u=>tasks.push(goldpx_fetchTO(u,9000).then(goldpx_parseStooq)));
-  try{ return await Promise.any(tasks); }
+  goldpx_proxies(yA).forEach(u=>tasks.push(goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)));
+  goldpx_proxies(yB).forEach(u=>tasks.push(goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)));
+  goldpx_proxies(st).forEach(u=>tasks.push(goldpx_fetchTO(u,7000).then(goldpx_parseStooq)));
+  try{ const d = await Promise.any(tasks); goldpx_saveOHLC(metal, d); return d; }
   catch(e){ return null; }
 }
 
@@ -2963,11 +3003,26 @@ async function goldpx_renderAnalysis(force){
   if(!body) return;
   const ck=GOLDPX.cache[metal];
   if(!force && ck && (Date.now()-ck.t<GOLDPX.ttl)){ goldpx_paint(ck.a,metal); return; }
-  body.style.display='none'; err.style.display='none'; load.style.display='block';
+
+  // ── stale-while-revalidate: اعرض المخزّن فوراً ثم حدّث في الخلفية ──
+  let paintedFromCache=false;
+  const stored=goldpx_loadOHLC(metal);
+  if(stored && stored.d){
+    try{
+      const a0=px_analyze(stored.d);
+      GOLDPX.cache[metal]={t:stored.t,a:a0};
+      goldpx_paint(a0,metal);
+      paintedFromCache=true;
+    }catch(e){}
+    // إذا كان المخزّن حديثاً بما يكفي ولم يُطلب تحديث → توقف
+    if(paintedFromCache && !force && (Date.now()-stored.t < GOLDPX.ohlcTtl)) return;
+  }
+
+  if(!paintedFromCache){ body.style.display='none'; err.style.display='none'; load.style.display='block'; }
   if(rBtn) rBtn.innerHTML='<div class="spinner" style="width:13px;height:13px"></div>';
   const data=await goldpx_fetchOHLC(metal);
   if(rBtn) rBtn.innerHTML='↻';
-  if(!data){ load.style.display='none'; err.style.display='block'; return; }
+  if(!data){ if(!paintedFromCache){ load.style.display='none'; err.style.display='block'; } return; }
   const a=px_analyze(data);
   GOLDPX.cache[metal]={t:Date.now(),a:a};
   goldpx_paint(a,metal);
