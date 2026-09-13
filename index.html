@@ -510,10 +510,23 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             <div style="display:flex;justify-content:space-between;padding:8px 0 2px;margin-top:6px;border-top:1px dashed rgba(255,255,255,.12);">
               <span style="color:#FFFFFF;">🎯 الهدف عند الكسر</span><b class="num" id="pxTarget" style="color:var(--gold);">--</b>
             </div>
+            <div style="display:flex;justify-content:space-between;padding:4px 0 0;">
+              <span style="color:#FFFFFF;">🏔️ القمة المتوقعة</span><b class="num" id="pxPeak" style="color:var(--gold);">--</b>
+            </div>
           </div>
           <div id="pxVerdict" style="background:rgba(212,175,55,.08);border-radius:10px;padding:12px;font-size:13px;line-height:1.7;color:#FFFFFF;"></div>
           <div style="font-size:10px;color:#FFFFFF;margin-top:8px;text-align:center;line-height:1.5;">
             ترجيحات فنية احتمالية على الإطار اليومي · ليست نصيحة استثمارية · <span id="pxSource">--</span>
+          </div>
+          <div id="pxForecastsBox" style="background:var(--bg3);border-radius:10px;padding:12px;font-size:12px;line-height:1.5;margin-top:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <span style="font-size:12px;color:#FFFFFF;font-weight:700;">📊 توقعات البنوك <span id="pxForecastsMetal" style="font-weight:400;opacity:.7;"></span></span>
+              <span id="pxForecastsUpdated" style="font-size:10px;color:#FFFFFF;opacity:.6;">--</span>
+            </div>
+            <div id="pxForecastsList" style="display:flex;flex-direction:column;">
+              <div style="color:#FFFFFF;opacity:.6;">جارٍ التحميل...</div>
+            </div>
+            <div style="font-size:9.5px;color:#FFFFFF;opacity:.5;margin-top:6px;">مجمّعة من تقارير البنوك/المحللين تلقائياً أسبوعياً · ليست نصيحة استثمارية</div>
           </div>
         </div>
         <div id="pxLoading" style="text-align:center;padding:26px 10px;color:#FFFFFF;font-size:13px;">
@@ -2738,7 +2751,7 @@ document.addEventListener('click', function(e) {
 // ═══════════════════════════════════════════
 //  PRICE-EXPLOSION PREDICTOR ENGINE  (added)
 // ═══════════════════════════════════════════
-const GOLDPX = { cache:{}, ttl: 15*60*1000, ohlcTtl: 6*60*60*1000 };
+const GOLDPX = { cache:{}, ttl: 15*60*1000, ohlcTtl: 6*60*60*1000, forecastsTtl: 6*60*60*1000, forecastsCache:{} };
 
 // ── persistent OHLC cache (localStorage) ─ يجعل التحميل فورياً عند إعادة الفتح ──
 function goldpx_ohlcKey(metal){ return 'goldpx_ohlc_'+metal; }
@@ -2983,6 +2996,8 @@ function px_analyze(data){
   const rangeH=resistance-support, atr=atrNow;
   // measured move from the breakout level, capped at 4×ATR
   const move=Math.min(Math.max(rangeH, atr*1.5), atr*4);
+  // القمة المتوقعة: مضاعفة الهدف الحالي عبر سقف ATR أكبر (6× بدل 4×)
+  const moveExt=Math.min(Math.max(rangeH, atr*1.5), atr*6);
   let timing;
   if(intensity>=0.85) timing='وشيك جداً — خلال 1–3 شموع';
   else if(intensity>=0.7) timing='قريب — خلال 3–6 شموع';
@@ -2990,12 +3005,57 @@ function px_analyze(data){
   else timing='لا يوجد ضغط واضح بعد';
   return {price:price,prob:prob,intensity:intensity,pct:pct,dur:dur,ttmOn:ttmOn,adx:adxo.adx,rsi:rsi,
     dir:dir,dirClass:dirClass,dScore:dScore,conf:conf,support:support,resistance:resistance,
-    targetUp:resistance+move,targetDown:support-move,timing:timing,hasVolume:data.hasVolume,source:data.source};
+    targetUp:resistance+move,targetDown:support-move,peakUp:resistance+moveExt,peakDown:support-moveExt,
+    timing:timing,hasVolume:data.hasVolume,source:data.source};
+}
+
+// ── توقعات البنوك/المحللين (مخزّنة في جدول gold_forecasts وتُحدَّث تلقائياً أسبوعياً) ──
+async function goldpx_loadForecasts(metal, force){
+  metal = metal || 'gold';
+  const listEl=document.getElementById('pxForecastsList'), updEl=document.getElementById('pxForecastsUpdated');
+  if(!listEl) return;
+  const mEl=document.getElementById('pxForecastsMetal'); if(mEl) mEl.textContent = metal==='gold' ? '(ذهب)' : '(فضة)';
+  const c=GOLDPX.forecastsCache[metal];
+  if(!force && c && c.list && (Date.now()-c.t<GOLDPX.forecastsTtl)){ goldpx_paintForecasts(c.list); return; }
+  try{
+    const rows=await sbGet('gold_forecasts','select=*&metal=eq.'+encodeURIComponent(metal)+'&order=created_at.desc&limit=5');
+    GOLDPX.forecastsCache[metal]={t:Date.now(),list:rows};
+    goldpx_paintForecasts(rows);
+  }catch(e){
+    if(c && c.list) goldpx_paintForecasts(c.list);
+    else listEl.innerHTML='<div style="color:#FFFFFF;opacity:.6;">تعذّر تحميل توقعات البنوك حالياً</div>';
+  }
+}
+
+function goldpx_paintForecasts(rows){
+  const listEl=document.getElementById('pxForecastsList'), updEl=document.getElementById('pxForecastsUpdated');
+  if(!listEl) return;
+  if(!rows || !rows.length){ listEl.innerHTML='<div style="color:#FFFFFF;opacity:.6;">لا توجد توقعات مخزّنة بعد</div>'; return; }
+  const er=(typeof gold_gold_state!=='undefined' && gold_gold_state.exchangeRate) || 3.75;
+  listEl.innerHTML = rows.map(function(f){
+    const arrow = f.direction==='up' ? '<span style="color:var(--green)">▲</span>' : f.direction==='down' ? '<span style="color:var(--red)">▼</span>' : '<span style="color:#FFFFFF">↔</span>';
+    const hasPrice = f.target_price!=null && f.target_price!=='';
+    const sarPerOz = hasPrice ? Number(f.target_price)*er : null;
+    const price = hasPrice ? ('$'+Number(f.target_price).toLocaleString('en-US')+' <span style="opacity:.75;font-weight:400;">('+fmt(sarPerOz,0)+' ريال/أونصة)</span>') : '';
+    const tf = f.timeframe ? (' · '+f.timeframe) : '';
+    const sarPerGram = hasPrice ? (Number(f.target_price)/TROY_OZ_TO_GRAM)*er : null;
+    const sarLine = hasPrice ? ('<div style="font-size:10.5px;color:var(--gold);opacity:.9;margin-top:1px;">≈ '+fmt(sarPerGram,2)+' ريال/جرام (بسعر صرف '+fmt(er,2)+')</div>') : '';
+    const note = f.note ? ('<div style="font-size:10.5px;color:#FFFFFF;opacity:.75;margin-top:1px;">'+f.note+'</div>') : '';
+    return '<div style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);">'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">'
+        +'<span style="color:#FFFFFF;font-weight:600;white-space:nowrap;">'+(f.source||'')+'</span>'
+        +'<span class="num" style="color:var(--gold);text-align:left;">'+arrow+' '+price+tf+'</span>'
+      +'</div>'+sarLine+note+
+    '</div>';
+  }).join('');
+  const latestT = rows.reduce(function(a,f){ const t=new Date(f.created_at||0).getTime(); return t>a?t:a; },0);
+  if(updEl) updEl.textContent = latestT ? ('آخر تحديث: '+new Date(latestT).toLocaleDateString('ar-SA')) : '--';
 }
 
 async function goldpx_renderAnalysis(force){
   try{ const _ki=document.getElementById('pxKeyInput'); if(_ki && !_ki.value){ const _k=goldpx_getKey(); if(_k) _ki.value=_k; } }catch(e){}
   const metal = (typeof gold_gold_state!=='undefined' && gold_gold_state.chartMetal) || 'gold';
+  goldpx_loadForecasts(metal, force);
   const bg=document.getElementById('pxBtnGold'), bs=document.getElementById('pxBtnSilver');
   if(bg) bg.classList.toggle('active',metal==='gold');
   if(bs) bs.classList.toggle('active',metal==='silver');
@@ -3049,6 +3109,7 @@ function goldpx_paint(a,metal){
   document.getElementById('pxPrice').textContent=fmt(a.price,dec)+' $';
   document.getElementById('pxSup').textContent=fmt(a.support,dec)+' $';
   document.getElementById('pxTarget').textContent = a.dirClass==='up'?('▲ '+fmt(a.targetUp,dec)+' $') : a.dirClass==='down'?('▼ '+fmt(a.targetDown,dec)+' $') : ('▲ '+fmt(a.targetUp,dec)+' / ▼ '+fmt(a.targetDown,dec)+' $');
+  document.getElementById('pxPeak').textContent = a.dirClass==='up'?('▲ '+fmt(a.peakUp,dec)+' $') : a.dirClass==='down'?('▼ '+fmt(a.peakDown,dec)+' $') : ('▲ '+fmt(a.peakUp,dec)+' / ▼ '+fmt(a.peakDown,dec)+' $');
   document.getElementById('pxSource').textContent='المصدر: '+a.source+(a.hasVolume?'':' (بدون حجم)');
   let v='';
   if(a.prob>=55) v='⚡ '+name+' في <b>حالة ضغط قوية</b> واحتمال الانفجار مرتفع ('+a.prob+'%). ';
