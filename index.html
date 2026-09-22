@@ -782,6 +782,10 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
               <input type="number" id="sellGrams" placeholder="0.00">
             </div>
           </div>
+          <div class="inp-group">
+            <label>🔮 محاكاة سعر مستقبلي ($/أونصة) — اختياري</label>
+            <input type="number" id="sellHypoPrice" placeholder="مثلاً 5000">
+          </div>
           <button class="btn btn-outline" onclick="gold_calcSell()" style="margin-top:4px;">احسب العائد</button>
           <div id="sellResult" style="display:none;background:var(--bg3);border-radius:9px;padding:12px;font-size:13px;line-height:2;"></div>
         </div>
@@ -2237,7 +2241,16 @@ function gold_calcSell() {
   const metal = document.getElementById('sellMetal').value;
   const grams = parseFloat(document.getElementById('sellGrams').value) || 0;
   const er = gold_gold_state.exchangeRate;
-  const mPriceSAR = getLocalSellPriceSAR(metal);
+
+  // 🔮 محاكاة سعر مستقبلي اختياري ($/أونصة، مثل "لو وصل الذهب لـ5000$")
+  // إن تُرك الحقل فارغاً يبقى كل شيء كما كان تماماً (يعتمد على السعر الحي الفعلي)
+  const hypoOz = parseFloat(document.getElementById('sellHypoPrice').value) || 0;
+  const isSim = hypoOz > 0;
+
+  // السعر الحقيقي (العالمي) للجرام بالريال — قبل خصم فرق البنك
+  const globalPriceSAR = isSim ? (hypoOz / TROY_OZ_TO_GRAM) * er : getGlobalPriceSAR(metal);
+  // سعر البيع الفعلي بعد خصم فرق البنك — هذا ما يُطبَّق على العملية الحقيقية
+  const mPriceSAR = isSim ? Math.max(globalPriceSAR - getSpread(metal), 0) : getLocalSellPriceSAR(metal);
 
   if (!grams || !mPriceSAR) { alert('يرجى إدخال الكمية أولاً وتحديث الأسعار'); return; }
 
@@ -2247,15 +2260,22 @@ function gold_calcSell() {
   const revenue = grams * mPriceSAR;
   const cost = grams * avgCost;
   const profit = revenue - cost;
+  // ⚠️ لا توجد أي عملية شراء مسجّلة لهذا المعدن على هذا الحساب حالياً (avail=0) —
+  // في هذه الحالة "التكلفة" و"الربح" بلا معنى (الربح = العائد كاملاً)، فننبّه المستخدم بوضوح
+  // بدل عرض "التكلفة: 0" و"الربح" الصافي المزيّف الذي أدى للالتباس
+  const noCostData = avail <= 0;
 
   const res = document.getElementById('sellResult');
   res.style.display = 'block';
   res.innerHTML = `
+    ${isSim ? `<div style="color:#F59E0B;font-weight:700;margin-bottom:4px;">🔮 محاكاة: لو وصل السعر إلى $${fmt(hypoOz,0)}/أونصة (ليس السعر الحالي)</div>` : ''}
+    ${noCostData ? `<div style="color:#F59E0B;font-size:11.5px;margin-bottom:4px;">⚠️ لا توجد عمليات شراء مسجّلة لهذا المعدن على هذا الحساب الآن، فلا يمكن حساب التكلفة أو الربح الصافي الحقيقي (تأكد أنك مسجّل دخول بحسابك وأن سجل العمليات ظاهر). الرقم أدناه هو العائد الإجمالي فقط.</div>` : ''}
     <div>الكمية المباعة: <b class="num">${fmt(grams,3)} جم</b></div>
-    <div>سعر البيع: <b class="num" dir="ltr">SAR ${fmt(mPriceSAR,2)}/جم</b></div>
+    <div>السعر الحقيقي (عالمي): <b class="num" dir="ltr">SAR ${fmt(globalPriceSAR,2)}/جم</b></div>
+    <div>سعر البيع (بعد فرق البنك): <b class="num" dir="ltr">SAR ${fmt(mPriceSAR,2)}/جم</b></div>
     <div>العائد: <b class="num" dir="ltr">SAR ${fmt(revenue,0)}</b> | <b class="num" dir="ltr">USD ${fmt(revenue/er,2)}</b></div>
-    <div>التكلفة: <b class="num" dir="ltr">SAR ${fmt(cost,0)}</b></div>
-    <div style="color:${profit>=0?'var(--green)':'var(--red)'}">الربح: <b class="num" dir="ltr">SAR ${profit>=0?'+':''}${fmt(profit,0)}</b> | <b class="num" dir="ltr">USD ${profit>=0?'+':''}${fmt(profit/er,2)}</b></div>
+    <div>التكلفة: <b class="num" dir="ltr">SAR ${fmt(cost,0)}</b>${noCostData ? ' <span style="color:#F59E0B;font-size:11px;">(غير محسوبة — لا بيانات)</span>' : ''}</div>
+    <div style="color:${profit>=0?'var(--green)':'var(--red)'}">${noCostData ? 'العائد الصافي (بدون خصم تكلفة)' : 'الربح'}: <b class="num" dir="ltr">SAR ${profit>=0?'+':''}${fmt(profit,0)}</b> | <b class="num" dir="ltr">USD ${profit>=0?'+':''}${fmt(profit/er,2)}</b></div>
   `;
 }
 
