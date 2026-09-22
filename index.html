@@ -400,6 +400,74 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
     </div>
   </div>
 
+  <!-- ══════════ Hero: نظرة سريعة على المحفظة (واجهة رئيسية جديدة) ══════════ -->
+  <div id="heroSection" class="fade-in" style="max-width:480px;width:100%;margin:16px auto 4px;padding:0 16px;">
+    <div style="background:linear-gradient(145deg,var(--bg3),var(--bg2));border:1px solid var(--border);border-radius:18px;padding:18px;box-shadow:var(--shadow);margin-bottom:14px;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">القيمة الإجمالية</div>
+      <div class="num" id="heroTotalValue" style="font-size:30px;font-weight:900;color:var(--text);">-- SAR</div>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;padding-top:14px;border-top:1px solid var(--border2);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:20px;">🥇</span>
+          <div>
+            <div style="font-size:12px;color:var(--gold);font-weight:700;">ذهب (XAU)</div>
+            <div class="num" id="heroGoldGrams" style="font-size:11px;color:var(--text2);">-- جم</div>
+          </div>
+        </div>
+        <div class="num" id="heroGoldVal" style="font-size:14px;font-weight:700;color:var(--text);align-self:center;">-- SAR</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:20px;">⚪</span>
+          <div>
+            <div style="font-size:12px;color:var(--silver);font-weight:700;">فضة (XAG)</div>
+            <div class="num" id="heroSilverGrams" style="font-size:11px;color:var(--text2);">-- جم</div>
+          </div>
+        </div>
+        <div class="num" id="heroSilverVal" style="font-size:14px;font-weight:700;color:var(--text);align-self:center;">-- SAR</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:18px;padding:18px;margin-bottom:14px;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;font-weight:700;">الأسعار اللحظية</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;">
+        <div>
+          <div style="font-size:11px;color:var(--gold);">ذهب / جرام (XAU)</div>
+          <div class="num" id="heroGoldPriceSAR" style="font-size:17px;font-weight:900;">-- ﷼</div>
+        </div>
+        <div class="num" id="heroGoldChg" style="font-size:13px;font-weight:700;">--</div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border2);margin-top:6px;">
+        <div>
+          <div style="font-size:11px;color:var(--silver);">فضة / جرام (XAG)</div>
+          <div class="num" id="heroSilverPriceSAR" style="font-size:17px;font-weight:900;">-- ﷼</div>
+        </div>
+        <div class="num" id="heroSilverChg" style="font-size:13px;font-weight:700;">--</div>
+      </div>
+      <div style="margin-top:12px;">
+        <canvas id="heroTrendCanvas" width="440" height="90" style="width:100%;height:70px;display:block;"></canvas>
+        <div style="display:flex;gap:14px;justify-content:center;font-size:10px;color:var(--text2);margin-top:4px;">
+          <span><span style="color:var(--gold);">▬</span> ذهب</span>
+          <span><span style="color:var(--silver);">▬</span> فضة</span>
+          <span>(آخر 30 نقطة سعر)</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+      <button class="btn btn-gold" onclick="heroBuy('gold')" style="padding:10px 4px;font-size:12px;">🥇 شراء ذهب</button>
+      <button class="btn btn-outline" onclick="heroBuy('silver')" style="padding:10px 4px;font-size:12px;">⚪ شراء فضة</button>
+      <button class="btn" onclick="heroSell()" style="padding:10px 4px;font-size:12px;background:var(--bg4);color:var(--text);">💰 بيع</button>
+    </div>
+
+    <div style="display:flex;justify-content:space-around;background:var(--bg3);border:1px solid var(--border2);border-radius:16px;padding:8px 4px;margin-bottom:20px;">
+      <div onclick="heroNav('heroSection')" style="cursor:pointer;text-align:center;color:var(--gold);font-size:10px;">🏠<br>الرئيسية</div>
+      <div onclick="heroNav('marketsSection')" style="cursor:pointer;text-align:center;color:var(--text2);font-size:10px;">📈<br>الأسواق</div>
+      <div onclick="heroNav('tradeSection')" style="cursor:pointer;text-align:center;color:var(--text2);font-size:10px;">🔄<br>التداول</div>
+      <div onclick="heroNav('assetsSection')" style="cursor:pointer;text-align:center;color:var(--text2);font-size:10px;">💰<br>الأصول</div>
+      <div onclick="openSettings()" style="cursor:pointer;text-align:center;color:var(--text2);font-size:10px;">⚙️<br>الحساب</div>
+    </div>
+  </div>
+
   <!-- Main Grid -->
   <div class="main-grid">
 
@@ -436,7 +504,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
 
       <!-- Chart (TradingView) -->
-      <div class="chart-container fade-in">
+      <div class="chart-container fade-in" id="marketsSection">
         <div class="chart-header">
           <div style="display:flex;align-items:center;gap:12px;">
             <h3 id="chartTitle">TVC:GOLD — الذهب (فوري)</h3>
@@ -552,7 +620,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
 
       <!-- Holdings Table -->
-      <div class="card fade-in">
+      <div class="card fade-in" id="assetsSection">
         <div class="card-title"><span class="dot dot-gold"></span> سجل العمليات</div>
         <div style="overflow-x:auto;">
           <table class="holdings-table" id="holdingsTable">
@@ -663,7 +731,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
 
       <!-- Add Operation -->
-      <div class="card">
+      <div class="card" id="tradeSection">
         <div class="card-title"><span class="dot dot-blue"></span> إضافة عملية</div>
         <div class="op-form">
           <div class="row2">
@@ -1398,13 +1466,22 @@ function updatePriceDisplay(prevGold, prevSilver) {
     const el = document.getElementById('tGoldC');
     el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
     el.className = 'ticker-change ' + (chg >= 0 ? 'up' : 'dn');
+    const hgc=document.getElementById('heroGoldChg');
+    if(hgc){ hgc.textContent=(chg>=0?'▲ +':'▼ ')+Math.abs(chg).toFixed(2)+'%'; hgc.style.color=chg>=0?'var(--green)':'var(--red)'; }
   }
   if (prevSilver) {
     const chg = ((sUSD - prevSilver) / prevSilver * 100);
     const el = document.getElementById('tSilverC');
     el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
     el.className = 'ticker-change ' + (chg >= 0 ? 'up' : 'dn');
+    const hsc=document.getElementById('heroSilverChg');
+    if(hsc){ hsc.textContent=(chg>=0?'▲ +':'▼ ')+Math.abs(chg).toFixed(2)+'%'; hsc.style.color=chg>=0?'var(--green)':'var(--red)'; }
   }
+  try{
+    const hgp=document.getElementById('heroGoldPriceSAR'); if(hgp) hgp.textContent=fmt(gUSD/TROY_OZ_TO_GRAM*er,2)+' ﷼';
+    const hsp=document.getElementById('heroSilverPriceSAR'); if(hsp) hsp.textContent=fmt(sUSD/TROY_OZ_TO_GRAM*er,2)+' ﷼';
+    heroDrawTrend();
+  }catch(e){}
 }
 
 function getGlobalPriceSAR(metal) {
@@ -1846,6 +1923,13 @@ async function deleteOperationFromModal(id, e) {
 
 function gold_gold_renderHoldings() {
   const tbody = document.getElementById('holdingsTbody');
+  // ✅ حفظ موضع التمرير داخل قوائم العمليات (ذهب/فضة) قبل إعادة البناء
+  // كي لا يفقد المستخدم مكانه (مثل آخر عملية شراء) عند كل تحديث تلقائي للأسعار
+  const scrollPos = {};
+  ['gold','silver'].forEach(m => {
+    const el = document.getElementById(m + 'OpsScroll');
+    if (el) scrollPos[m] = el.scrollTop;
+  });
   if (!gold_gold_state.operations.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="icon">📭</div><div>لا توجد عمليات بعد</div></td></tr>';
     return;
@@ -2006,7 +2090,7 @@ function gold_gold_renderHoldings() {
               <div style="font-size:10px;color:var(--text3);">${fmt(totalBuyCost,0)} + (${netPnl>=0?'+':''}${fmt(netPnl,0)})</div>
             </div>
           </div>
-          <div style="max-height:260px;overflow-y:auto;border-radius:8px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent;">
+          <div id="${metal}OpsScroll" style="max-height:260px;overflow-y:auto;border-radius:8px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent;">
             <table style="width:100%;border-collapse:collapse;">
               <thead style="position:sticky;top:0;z-index:2;background:var(--bg3);">
                 <tr style="border-bottom:1px solid var(--border2);">
@@ -2036,6 +2120,12 @@ function gold_gold_renderHoldings() {
   html += renderMetalBox(silverOps, 'silver', 'الفضة', 'var(--silver)');
 
   tbody.innerHTML = html;
+
+  // ✅ استرجاع موضع التمرير بعد إعادة البناء
+  ['gold','silver'].forEach(m => {
+    const el = document.getElementById(m + 'OpsScroll');
+    if (el && scrollPos[m]) el.scrollTop = scrollPos[m];
+  });
 }
 
 // ═══════════════════════════════════════════
@@ -2118,6 +2208,13 @@ function gold_gold_recalcAll() {
   document.getElementById('sGoldVal').textContent   = fmt(goldVal, 0) + ' SAR';
   document.getElementById('sSilverGrams').textContent = fmt(silverHoldingGrams, 2);
   document.getElementById('sSilverVal').textContent   = fmt(silverVal, 0) + ' SAR';
+  try{
+    const hv=document.getElementById('heroTotalValue'); if(hv) hv.textContent=fmt(goldVal+silverVal,0)+' SAR';
+    const hgg=document.getElementById('heroGoldGrams'); if(hgg) hgg.textContent=fmt(goldHoldingGrams,2)+' جم';
+    const hgv=document.getElementById('heroGoldVal'); if(hgv) hgv.textContent=fmt(goldVal,0)+' SAR';
+    const hsg=document.getElementById('heroSilverGrams'); if(hsg) hsg.textContent=fmt(silverHoldingGrams,2)+' جم';
+    const hsv=document.getElementById('heroSilverVal'); if(hsv) hsv.textContent=fmt(silverVal,0)+' SAR';
+  }catch(e){}
   document.getElementById('sStorageFees').textContent = '-' + fmt(storageFees + serviceFees, 0) + ' SAR';
 
   const pnlEl = document.getElementById('sPnL');
@@ -2592,6 +2689,46 @@ function closeSettings() { document.getElementById('settingsModal').classList.re
 function fmt(n, decimals = 2) {
   if (n === null || n === undefined || isNaN(n)) return '--';
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+// ══════════ Hero (الواجهة الرئيسية الجديدة) ══════════
+function heroNav(id){ const el=document.getElementById(id); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
+
+function heroBuy(metal){
+  try{ setOpType('buy'); }catch(e){}
+  try{ const sel=document.getElementById('opMetal'); if(sel){ sel.value=metal; if(typeof updatePriceInputLabel==='function') updatePriceInputLabel(); } }catch(e){}
+  heroNav('tradeSection');
+}
+function heroSell(){
+  try{ setOpType('sell'); }catch(e){}
+  heroNav('tradeSection');
+}
+
+function heroDrawTrend(){
+  const cv=document.getElementById('heroTrendCanvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'); const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  function series(metal){
+    try{
+      const s=goldpx_loadOHLC(metal);
+      if(!s || !s.d || !s.d.candles) return null;
+      const closes=s.d.candles.slice(-30).map(function(c){return c.c;}).filter(function(v){return typeof v==='number' && !isNaN(v);});
+      return closes.length>=2?closes:null;
+    }catch(e){ return null; }
+  }
+  function drawLine(closes,color){
+    if(!closes) return;
+    const min=Math.min.apply(null,closes), max=Math.max.apply(null,closes), rng=(max-min)||1;
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineJoin='round';
+    closes.forEach(function(v,i){
+      const x = i/(closes.length-1)*(W-6)+3;
+      const y = H-6 - ((v-min)/rng)*(H-12);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+  drawLine(series('gold'), '#D4AF37');
+  drawLine(series('silver'), '#C0C0C0');
 }
 
 // Close modal on outside click
@@ -3119,6 +3256,7 @@ function goldpx_paint(a,metal){
   else if(a.dirClass==='down') v+='الترجيح <b style="color:var(--red)">هبوطي</b>: كسر '+fmt(a.support,dec)+'$ يستهدف '+fmt(a.targetDown,dec)+'$.';
   else v+='الاتجاه <b>غير محسوم</b>؛ راقب كسر '+fmt(a.resistance,dec)+'$ صعوداً أو '+fmt(a.support,dec)+'$ هبوطاً للتأكيد.';
   document.getElementById('pxVerdict').innerHTML=v;
+  try{ heroDrawTrend(); }catch(e){}
 }
 
 </script>
