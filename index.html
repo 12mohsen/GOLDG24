@@ -1165,6 +1165,9 @@ async function doLogin() {
     if (accounts[0].pass_hash !== btoa(pass)) { showErr(err,'كلمة المرور غير صحيحة'); return; }
     err.style.display = 'none';
     gold_gold_state.currentUser = user;
+    // ✅ تذكّر اسم المستخدم دائماً عند أي تسجيل دخول ناجح (بغض النظر عن خيار "حفظ البيانات" عند الخروج)
+    // كي لا يُطلب إدخاله من جديد إذا أُغلق التطبيق دون الخروج الرسمي، أو عند إعادة فتحه من جديد
+    localStorage.setItem('savedUsername', user);
     await gold_gold_loadFromSupabase();
     enterApp();
   } catch (e) {
@@ -1244,8 +1247,8 @@ function confirmLogout() {
     if (user) localStorage.setItem('savedUsername', user);
     if (pass) localStorage.setItem('savedPassword', pass);
   } else {
-    // مسح البيانات المحفوظة
-    localStorage.removeItem('savedUsername');
+    // مسح كلمة المرور المحفوظة فقط (بيانات حساسة) — لكن نُبقي اسم المستخدم محفوظاً
+    // كتذكّر بسيط وغير حساس، حتى لا يُطلب إدخاله يدوياً كل مرة
     localStorage.removeItem('savedPassword');
   }
   // تصفير كامل للبيانات عند الخروج لمنع تسرب بيانات لمستخدم آخر
