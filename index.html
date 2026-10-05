@@ -535,6 +535,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             <button class="metal-btn gold-btn active" id="pxBtnGold" onclick="switchChartMetal('gold')" style="padding:5px 12px;font-size:12px;">ذهب</button>
             <button class="metal-btn silver-btn" id="pxBtnSilver" onclick="switchChartMetal('silver')" style="padding:5px 12px;font-size:12px;">فضة</button>
             <button class="icon-btn" id="pxRefresh" onclick="goldpx_renderAnalysis(true)" title="تحديث التحليل" style="width:30px;height:30px;font-size:14px;">↻</button>
+            <button class="icon-btn" id="pxKeyBtn" onclick="goldpx_toggleKeyPanel()" title="إضافة مفتاح API لمصدر بيانات أدق" style="width:30px;height:30px;font-size:14px;">🔑</button>
           </span>
         </div>
         <div id="pxBody" style="display:none;">
@@ -601,14 +602,17 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
           <div class="spinner" style="width:22px;height:22px;margin:0 auto 10px;"></div>
           جارٍ تحميل البيانات التاريخية وحساب المؤشرات...
         </div>
-        <div id="pxError" style="display:none;padding:14px 12px;color:#FFFFFF;font-size:12.5px;line-height:1.7;">
-          <div style="text-align:center;margin-bottom:10px;">تعذّر الجلب عبر المصادر المجانية (قد تكون محجوبة على شبكتك).</div>
+        <div id="pxError" style="display:none;padding:14px 12px 0;color:#FFFFFF;font-size:12.5px;line-height:1.7;text-align:center;">
+          تعذّر الجلب عبر المصادر المجانية (قد تكون محجوبة على شبكتك) — أضف مفتاحاً مجانياً بالأسفل 👇
+        </div>
+        <!-- 🔑 لوحة مفتاح API — مستقلة عن حالة الفشل، يمكن فتحها يدوياً في أي وقت من زر 🔑 بالأعلى -->
+        <div id="pxKeyPanel" style="display:none;padding:14px 12px;color:#FFFFFF;font-size:12.5px;line-height:1.7;">
           <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:10px;">
             <div style="margin-bottom:6px;color:#FFFFFF;">✅ الحل الموصى به: مفتاح <b style="color:var(--gold);">Gold-API</b> مجاني — نفس مصدر السعر الحي الذي يعمل بالفعل في أعلى التطبيق:</div>
             <ol style="margin:0 0 8px;padding-inline-start:18px;color:#FFFFFF;">
               <li>سجّل مجاناً في <a href="https://gold-api.com" target="_blank" style="color:var(--gold);">gold-api.com</a></li>
               <li>انسخ الـ API key من حسابك</li>
-              <li>الصقه هنا مرة واحدة (يُحفظ تلقائياً):</li>
+              <li>الصقه هنا مرة واحدة (يُحفظ تلقائياً على هذا الجهاز فقط):</li>
             </ol>
             <div style="display:flex;gap:6px;">
               <input id="pxGaKeyInput" type="text" placeholder="Gold-API key" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:12px;">
@@ -620,14 +624,15 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
             <ol style="margin:0 0 8px;padding-inline-start:18px;color:#FFFFFF;">
               <li>سجّل مجاناً في <a href="https://twelvedata.com/register" target="_blank" style="color:var(--gold);">twelvedata.com</a></li>
               <li>انسخ الـ API key من لوحة التحكم</li>
-              <li>الصقه هنا مرة واحدة (يُحفظ تلقائياً):</li>
+              <li>الصقه هنا مرة واحدة (يُحفظ تلقائياً على هذا الجهاز فقط):</li>
             </ol>
             <div style="display:flex;gap:6px;">
               <input id="pxKeyInput" type="text" placeholder="API key" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:12px;">
               <button class="btn btn-gold" onclick="goldpx_saveKey()" style="padding:8px 14px;font-size:12px;white-space:nowrap;">حفظ وتحليل</button>
             </div>
           </div>
-          <div style="text-align:center;margin-top:10px;"><a href="#" onclick="goldpx_renderAnalysis(true);return false;" style="color:var(--gold);">إعادة المحاولة بدون مفتاح</a></div>
+          <div id="pxKeyStatus" style="text-align:center;margin-top:8px;font-size:12px;min-height:16px;"></div>
+          <div style="text-align:center;margin-top:4px;"><a href="#" onclick="goldpx_renderAnalysis(true);return false;" style="color:var(--gold);">إعادة المحاولة</a></div>
         </div>
       </div>
 
@@ -2960,10 +2965,45 @@ function goldpx_proxies(u){
   ];
 }
 function goldpx_getKey(){ try{ return (localStorage.getItem('goldpx_td_key')||'').trim(); }catch(e){ return (GOLDPX._key||''); } }
-function goldpx_saveKey(){ const el=document.getElementById('pxKeyInput'); const k=(el&&el.value||'').trim(); if(!k) return; try{ localStorage.setItem('goldpx_td_key',k); }catch(e){ GOLDPX._key=k; } goldpx_renderAnalysis(true); }
+async function goldpx_saveKey(){
+  const el=document.getElementById('pxKeyInput'); const k=(el&&el.value||'').trim();
+  const st=document.getElementById('pxKeyStatus');
+  if(!k){ if(st){ st.textContent='❌ الصق المفتاح في الخانة أولاً'; st.style.color='#ef4444'; } if(el) el.focus(); return; }
+  try{ localStorage.setItem('goldpx_td_key',k); }catch(e){ GOLDPX._key=k; }
+  if(st){ st.textContent='⏳ جارٍ الحفظ والتحليل...'; st.style.color='#FFFFFF'; }
+  await goldpx_renderAnalysis(true);
+  if(st){
+    const failed = document.getElementById('pxError').style.display==='block';
+    st.textContent = failed ? '❌ لم ينجح حتى بهذا المفتاح — تحقّق من صحته' : '✅ تم الحفظ والتحليل بنجاح';
+    st.style.color = failed ? '#ef4444' : '#22c55e';
+  }
+}
 // ── Gold-API.com (نفس مصدر السعر الحي الذي يعمل فعلياً في التطبيق) — مفتاح مجاني منفصل ──
 function goldpx_getGaKey(){ try{ return (localStorage.getItem('goldpx_ga_key')||'').trim(); }catch(e){ return (GOLDPX._gaKey||''); } }
-function goldpx_saveGaKey(){ const el=document.getElementById('pxGaKeyInput'); const k=(el&&el.value||'').trim(); if(!k) return; try{ localStorage.setItem('goldpx_ga_key',k); }catch(e){ GOLDPX._gaKey=k; } goldpx_renderAnalysis(true); }
+async function goldpx_saveGaKey(){
+  const el=document.getElementById('pxGaKeyInput'); const k=(el&&el.value||'').trim();
+  const st=document.getElementById('pxKeyStatus');
+  if(!k){ if(st){ st.textContent='❌ الصق المفتاح في الخانة أولاً'; st.style.color='#ef4444'; } if(el) el.focus(); return; }
+  try{ localStorage.setItem('goldpx_ga_key',k); }catch(e){ GOLDPX._gaKey=k; }
+  if(st){ st.textContent='⏳ جارٍ الحفظ والتحليل...'; st.style.color='#FFFFFF'; }
+  await goldpx_renderAnalysis(true);
+  if(st){
+    const failed = document.getElementById('pxError').style.display==='block';
+    st.textContent = failed ? '❌ لم ينجح حتى بهذا المفتاح — تحقّق من صحته' : '✅ تم الحفظ والتحليل بنجاح';
+    st.style.color = failed ? '#ef4444' : '#22c55e';
+  }
+}
+// 🔑 فتح/إغلاق لوحة مفتاح API يدوياً في أي وقت (بدل انتظار فشل الجلب لإظهارها)
+function goldpx_toggleKeyPanel(){
+  const p = document.getElementById('pxKeyPanel');
+  if(!p) return;
+  const show = (p.style.display === 'none' || !p.style.display);
+  p.style.display = show ? 'block' : 'none';
+  if(show){
+    try{ const _gi=document.getElementById('pxGaKeyInput'); if(_gi && !_gi.value){ const _g=goldpx_getGaKey(); if(_g) _gi.value=_g; } }catch(e){}
+    try{ const _ki=document.getElementById('pxKeyInput'); if(_ki && !_ki.value){ const _k=goldpx_getKey(); if(_k) _ki.value=_k; } }catch(e){}
+  }
+}
 // يبني سلسلة شموع يومية تقريبية من endpoint /history (max/min/avg لكل يوم) — دقيق كفاية للمؤشرات الفنية
 // لأن القيم "o" (الافتتاح) غير مستخدمة فعلياً في أي من دوال التحليل (ATR/ADX/Bollinger/Pivots تعتمد h/l/c فقط)
 async function goldpx_fetchGoldApiHistory(metal, ms){
@@ -3329,7 +3369,7 @@ async function goldpx_renderAnalysis(force){
   if(rBtn) rBtn.innerHTML='<div class="spinner" style="width:13px;height:13px"></div>';
   const data=await goldpx_fetchOHLC(metal);
   if(rBtn) rBtn.innerHTML='↻';
-  if(!data){ if(!paintedFromCache){ load.style.display='none'; err.style.display='block'; } return; }
+  if(!data){ if(!paintedFromCache){ load.style.display='none'; err.style.display='block'; const kp=document.getElementById('pxKeyPanel'); if(kp) kp.style.display='block'; } return; }
   const a=px_analyze(data);
   GOLDPX.cache[metal]={t:Date.now(),a:a};
   goldpx_paint(a,metal);
