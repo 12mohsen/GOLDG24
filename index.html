@@ -3061,29 +3061,57 @@ function goldpx_fetchEdge(metal, ms){
     new Promise((_,rej)=>setTimeout(()=>rej(new Error('edge timeout')), ms))
   ]);
 }
+// يشغّل مجموعة محاولات بالتوازي (مصدر واحد عبر عدة بروكسيات مثلاً) ويرجع أول نجاح، أو null
+async function goldpx_tryStep(taskFactories){
+  if(!taskFactories.length) return null;
+  try{ return await Promise.any(taskFactories.map(f=>f())); }
+  catch(e){ return null; }
+}
 async function goldpx_fetchOHLC(metal){
   const ySym=metal==='gold'?'GC=F':'SI=F';
   const sSym=metal==='gold'?'xauusd':'xagusd';
   const yA='https://query1.finance.yahoo.com/v8/finance/chart/'+ySym+'?range=2y&interval=1d';
   const yB='https://query2.finance.yahoo.com/v8/finance/chart/'+ySym+'?range=2y&interval=1d';
   const st='https://stooq.com/q/d/l/?s='+sSym+'&i=d';
-  const tasks=[];
-  // المصدر الأساسي: دالة Supabase السيرفرية — الأسرع والأكثر موثوقية (عند توفرها)
-  tasks.push(goldpx_fetchEdge(metal));
-  // مصدر موثوق إضافي: Gold-API.com (نفس مصدر السعر الحي الذي يعمل فعلياً) — يحتاج مفتاحاً مجانياً
+
+  // ✅ المصادر تُجرَّب بالتسلسل حسب أولوية ثابتة (وليس بتسابق عشوائي بينها عبر Promise.any على الكل) —
+  // كي يعتمد كل الأجهزة (الجوال وسطح المكتب) على نفس المصدر عند توفره، فتتطابق نتائج التحليل بينها،
+  // بدل أن يحصل كل جهاز على تحليل مختلف بحسب أي مصدر استجاب أسرع على شبكته تحديداً.
+  // (المحاولات داخل كل خطوة — كعدة بروكسيات لنفس المزوّد — تبقى متوازية لأنها نفس البيانات أصلاً)
+  let d;
+
+  // 1) دالة Supabase السيرفرية (الأسرع والأكثر موثوقية عند توفرها)
+  d = await goldpx_tryStep([() => goldpx_fetchEdge(metal)]);
+  if(d){ goldpx_saveOHLC(metal, d); return d; }
+
+  // 2) Gold-API.com — نفس مصدر السعر الحي الذي يعمل فعلياً — إن توفر مفتاح
   const _gaKey=goldpx_getGaKey();
-  if(_gaKey){ tasks.push(goldpx_fetchGoldApiHistory(metal, 9000)); }
+  if(_gaKey){
+    d = await goldpx_tryStep([() => goldpx_fetchGoldApiHistory(metal, 9000)]);
+    if(d){ goldpx_saveOHLC(metal, d); return d; }
+  }
+
+  // 3) Twelve Data — إن توفر مفتاح
   const _key=goldpx_getKey();
   if(_key){
     const tdSym=metal==='gold'?'XAU/USD':'XAG/USD';
     const tdUrl='https://api.twelvedata.com/time_series?symbol='+encodeURIComponent(tdSym)+'&interval=1day&outputsize=400&apikey='+encodeURIComponent(_key);
-    tasks.push(goldpx_fetchTO(tdUrl,9000).then(goldpx_parseTwelve));
+    d = await goldpx_tryStep([() => goldpx_fetchTO(tdUrl,9000).then(goldpx_parseTwelve)]);
+    if(d){ goldpx_saveOHLC(metal, d); return d; }
   }
-  goldpx_proxies(yA).forEach(u=>tasks.push(goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)));
-  goldpx_proxies(yB).forEach(u=>tasks.push(goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)));
-  goldpx_proxies(st).forEach(u=>tasks.push(goldpx_fetchTO(u,7000).then(goldpx_parseStooq)));
-  try{ const d = await Promise.any(tasks); goldpx_saveOHLC(metal, d); return d; }
-  catch(e){ return null; }
+
+  // 4) Yahoo Finance عبر بروكسيات CORS مجانية (كل نسخ البروكسي لنفس المصدر تتنافس معاً فقط)
+  d = await goldpx_tryStep([
+    ...goldpx_proxies(yA).map(u => () => goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)),
+    ...goldpx_proxies(yB).map(u => () => goldpx_fetchTO(u,6500).then(goldpx_parseYahoo)),
+  ]);
+  if(d){ goldpx_saveOHLC(metal, d); return d; }
+
+  // 5) Stooq (الملاذ الأخير)
+  d = await goldpx_tryStep(goldpx_proxies(st).map(u => () => goldpx_fetchTO(u,7000).then(goldpx_parseStooq)));
+  if(d){ goldpx_saveOHLC(metal, d); return d; }
+
+  return null;
 }
 
 // ── indicator helpers ──
