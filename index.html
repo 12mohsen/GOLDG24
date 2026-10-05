@@ -2989,7 +2989,8 @@ async function goldpx_saveGaKey(){
   await goldpx_renderAnalysis(true);
   if(st){
     const failed = document.getElementById('pxError').style.display==='block';
-    st.textContent = failed ? '❌ لم ينجح حتى بهذا المفتاح — تحقّق من صحته' : '✅ تم الحفظ والتحليل بنجاح';
+    const reason = GOLDPX.lastGaError ? (' ('+GOLDPX.lastGaError+')') : '';
+    st.textContent = failed ? ('❌ لم ينجح'+reason) : '✅ تم الحفظ والتحليل بنجاح';
     st.style.color = failed ? '#ef4444' : '#22c55e';
   }
 }
@@ -3034,9 +3035,15 @@ async function goldpx_fetchGoldApiHistory(metal, ms){
       if([row.h,row.l,row.c].some(x=>isNaN(x)||x<=0)) continue;
       c.push({o:row.c, h:row.h, l:row.l, c:row.c, v:0});
     }
-    if(c.length<60) throw new Error('gold-api history short');
+    if(c.length<60) throw new Error('gold-api history short ('+c.length+' days)');
+    GOLDPX.lastGaError = null;
     return {candles:c, hasVolume:false, source:'Gold-API'};
-  }catch(e){ clearTimeout(to); throw e; }
+  }catch(e){
+    clearTimeout(to);
+    // 🩺 نخزّن سبب الفشل الحقيقي لعرضه للمستخدم بدل رسالة عامة غير مفيدة
+    GOLDPX.lastGaError = (e && e.message) ? String(e.message) : String(e);
+    throw e;
+  }
 }
 function goldpx_parseTwelve(txt){
   const j=JSON.parse(txt);
