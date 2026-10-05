@@ -603,8 +603,20 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
         </div>
         <div id="pxError" style="display:none;padding:14px 12px;color:#FFFFFF;font-size:12.5px;line-height:1.7;">
           <div style="text-align:center;margin-bottom:10px;">تعذّر الجلب عبر المصادر المجانية (قد تكون محجوبة على شبكتك).</div>
+          <div style="background:var(--bg3);border-radius:10px;padding:12px;margin-bottom:10px;">
+            <div style="margin-bottom:6px;color:#FFFFFF;">✅ الحل الموصى به: مفتاح <b style="color:var(--gold);">Gold-API</b> مجاني — نفس مصدر السعر الحي الذي يعمل بالفعل في أعلى التطبيق:</div>
+            <ol style="margin:0 0 8px;padding-inline-start:18px;color:#FFFFFF;">
+              <li>سجّل مجاناً في <a href="https://gold-api.com" target="_blank" style="color:var(--gold);">gold-api.com</a></li>
+              <li>انسخ الـ API key من حسابك</li>
+              <li>الصقه هنا مرة واحدة (يُحفظ تلقائياً):</li>
+            </ol>
+            <div style="display:flex;gap:6px;">
+              <input id="pxGaKeyInput" type="text" placeholder="Gold-API key" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px;color:var(--text);font-size:12px;">
+              <button class="btn btn-gold" onclick="goldpx_saveGaKey()" style="padding:8px 14px;font-size:12px;white-space:nowrap;">حفظ وتحليل</button>
+            </div>
+          </div>
           <div style="background:var(--bg3);border-radius:10px;padding:12px;">
-            <div style="margin-bottom:6px;color:#FFFFFF;">الحل المضمون: مفتاح <b style="color:var(--gold);">Twelve Data</b> مجاني (يعمل مباشرة بلا بروكسي):</div>
+            <div style="margin-bottom:6px;color:#FFFFFF;">بديل آخر: مفتاح <b style="color:var(--gold);">Twelve Data</b> مجاني:</div>
             <ol style="margin:0 0 8px;padding-inline-start:18px;color:#FFFFFF;">
               <li>سجّل مجاناً في <a href="https://twelvedata.com/register" target="_blank" style="color:var(--gold);">twelvedata.com</a></li>
               <li>انسخ الـ API key من لوحة التحكم</li>
@@ -966,6 +978,11 @@ function daysLeftForDeleted(op) {
 }
 
 const TROY_OZ_TO_GRAM = 31.1035;
+// ✅ يجب تعريف GOLDPX هنا مبكراً (قبل كود تسجيل الدخول/الدخول كزائر بالأسفل)
+// لأن enterGuestMode() يستدعي goldpx_renderAnalysis() التي تحتاج GOLDPX فوراً عند تحميل الصفحة —
+// تعريفها متأخراً بالأسفل كان يسبب "ReferenceError: Cannot access 'GOLDPX' before initialization"
+// في كل تحميل أول للصفحة (يمنع تحديث مُتنبّئ الانفجار السعري وبطاقة توقعات البنوك تلقائياً)
+const GOLDPX = { cache:{}, ttl: 15*60*1000, ohlcTtl: 6*60*60*1000, forecastsTtl: 6*60*60*1000, forecastsCache:{} };
 const BANK_SPREADS = {
   alahli: { name: 'الأهلي', spread: 6.09 },
   alrajhi: { name: 'الراجحي', spread: 6.09 },
@@ -2911,7 +2928,7 @@ document.addEventListener('click', function(e) {
 // ═══════════════════════════════════════════
 //  PRICE-EXPLOSION PREDICTOR ENGINE  (added)
 // ═══════════════════════════════════════════
-const GOLDPX = { cache:{}, ttl: 15*60*1000, ohlcTtl: 6*60*60*1000, forecastsTtl: 6*60*60*1000, forecastsCache:{} };
+// (GOLDPX مُعرَّفة مبكراً بالأعلى بجانب TROY_OZ_TO_GRAM — انظر الملاحظة هناك)
 
 // ── persistent OHLC cache (localStorage) ─ يجعل التحميل فورياً عند إعادة الفتح ──
 function goldpx_ohlcKey(metal){ return 'goldpx_ohlc_'+metal; }
@@ -2944,6 +2961,43 @@ function goldpx_proxies(u){
 }
 function goldpx_getKey(){ try{ return (localStorage.getItem('goldpx_td_key')||'').trim(); }catch(e){ return (GOLDPX._key||''); } }
 function goldpx_saveKey(){ const el=document.getElementById('pxKeyInput'); const k=(el&&el.value||'').trim(); if(!k) return; try{ localStorage.setItem('goldpx_td_key',k); }catch(e){ GOLDPX._key=k; } goldpx_renderAnalysis(true); }
+// ── Gold-API.com (نفس مصدر السعر الحي الذي يعمل فعلياً في التطبيق) — مفتاح مجاني منفصل ──
+function goldpx_getGaKey(){ try{ return (localStorage.getItem('goldpx_ga_key')||'').trim(); }catch(e){ return (GOLDPX._gaKey||''); } }
+function goldpx_saveGaKey(){ const el=document.getElementById('pxGaKeyInput'); const k=(el&&el.value||'').trim(); if(!k) return; try{ localStorage.setItem('goldpx_ga_key',k); }catch(e){ GOLDPX._gaKey=k; } goldpx_renderAnalysis(true); }
+// يبني سلسلة شموع يومية تقريبية من endpoint /history (max/min/avg لكل يوم) — دقيق كفاية للمؤشرات الفنية
+// لأن القيم "o" (الافتتاح) غير مستخدمة فعلياً في أي من دوال التحليل (ATR/ADX/Bollinger/Pivots تعتمد h/l/c فقط)
+async function goldpx_fetchGoldApiHistory(metal, ms){
+  ms = ms || 9000;
+  const key = goldpx_getGaKey();
+  if(!key) throw new Error('no gold-api key');
+  const symbol = metal === 'gold' ? 'XAU' : 'XAG';
+  const end = Math.floor(Date.now()/1000);
+  const start = end - 400*24*60*60;
+  const base = 'https://api.gold-api.com/history?symbol='+symbol+'&startTimestamp='+start+'&endTimestamp='+end+'&groupBy=day&orderBy=asc&aggregation=';
+  const headers = {'x-api-key': key};
+  const ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+  const to=setTimeout(()=>{ if(ctrl) try{ctrl.abort();}catch(e){} }, ms);
+  const sig = ctrl?ctrl.signal:undefined;
+  const getJson = u => fetch(u,{headers,signal:sig}).then(r=>{ if(!r.ok) throw new Error('gold-api HTTP '+r.status); return r.json(); });
+  try{
+    const [maxRows, minRows, avgRows] = await Promise.all([getJson(base+'max'), getJson(base+'min'), getJson(base+'avg')]);
+    clearTimeout(to);
+    const byDay = {};
+    (maxRows||[]).forEach(r=>{ const d=r.day; if(d){ byDay[d]=byDay[d]||{}; byDay[d].h=+r.max_price; } });
+    (minRows||[]).forEach(r=>{ const d=r.day; if(d){ byDay[d]=byDay[d]||{}; byDay[d].l=+r.min_price; } });
+    (avgRows||[]).forEach(r=>{ const d=r.day; if(d){ byDay[d]=byDay[d]||{}; byDay[d].c=+r.avg_price; } });
+    const days = Object.keys(byDay).sort();
+    const c = [];
+    for(const d of days){
+      const row = byDay[d];
+      if(row.h==null || row.l==null || row.c==null) continue;
+      if([row.h,row.l,row.c].some(x=>isNaN(x)||x<=0)) continue;
+      c.push({o:row.c, h:row.h, l:row.l, c:row.c, v:0});
+    }
+    if(c.length<60) throw new Error('gold-api history short');
+    return {candles:c, hasVolume:false, source:'Gold-API'};
+  }catch(e){ clearTimeout(to); throw e; }
+}
 function goldpx_parseTwelve(txt){
   const j=JSON.parse(txt);
   if(!j.values||!j.values.length) throw new Error(j.message||'no data');
@@ -3014,8 +3068,11 @@ async function goldpx_fetchOHLC(metal){
   const yB='https://query2.finance.yahoo.com/v8/finance/chart/'+ySym+'?range=2y&interval=1d';
   const st='https://stooq.com/q/d/l/?s='+sSym+'&i=d';
   const tasks=[];
-  // المصدر الأساسي: دالة Supabase السيرفرية — الأسرع والأكثر موثوقية
+  // المصدر الأساسي: دالة Supabase السيرفرية — الأسرع والأكثر موثوقية (عند توفرها)
   tasks.push(goldpx_fetchEdge(metal));
+  // مصدر موثوق إضافي: Gold-API.com (نفس مصدر السعر الحي الذي يعمل فعلياً) — يحتاج مفتاحاً مجانياً
+  const _gaKey=goldpx_getGaKey();
+  if(_gaKey){ tasks.push(goldpx_fetchGoldApiHistory(metal, 9000)); }
   const _key=goldpx_getKey();
   if(_key){
     const tdSym=metal==='gold'?'XAU/USD':'XAG/USD';
@@ -3156,8 +3213,9 @@ function px_analyze(data){
   const rangeH=resistance-support, atr=atrNow;
   // measured move from the breakout level, capped at 4×ATR
   const move=Math.min(Math.max(rangeH, atr*1.5), atr*4);
-  // القمة المتوقعة: مضاعفة الهدف الحالي عبر سقف ATR أكبر (6× بدل 4×)
-  const moveExt=Math.min(Math.max(rangeH, atr*1.5), atr*6);
+  // القمة المتوقعة: مضاعفة مسافة الهدف نفسها (1.5×) بحيث تكون دائماً أبعد من هدف الكسر
+  // ولا تتساوى معه حتى عند ضيق النطاق (لم تعد مقيّدة بنفس أرضية atr*1.5 التي تجعلها تتطابق مع move)
+  const moveExt=move*1.5;
   let timing;
   if(intensity>=0.85) timing='وشيك جداً — خلال 1–3 شموع';
   else if(intensity>=0.7) timing='قريب — خلال 3–6 شموع';
@@ -3214,6 +3272,7 @@ function goldpx_paintForecasts(rows){
 
 async function goldpx_renderAnalysis(force){
   try{ const _ki=document.getElementById('pxKeyInput'); if(_ki && !_ki.value){ const _k=goldpx_getKey(); if(_k) _ki.value=_k; } }catch(e){}
+  try{ const _gi=document.getElementById('pxGaKeyInput'); if(_gi && !_gi.value){ const _g=goldpx_getGaKey(); if(_g) _gi.value=_g; } }catch(e){}
   const metal = (typeof gold_gold_state!=='undefined' && gold_gold_state.chartMetal) || 'gold';
   goldpx_loadForecasts(metal, force);
   const bg=document.getElementById('pxBtnGold'), bs=document.getElementById('pxBtnSilver');
