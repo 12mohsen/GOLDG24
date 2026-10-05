@@ -3007,10 +3007,24 @@ function goldpx_toggleKeyPanel(){
 }
 // يبني سلسلة شموع يومية تقريبية من endpoint /history (max/min/avg لكل يوم) — دقيق كفاية للمؤشرات الفنية
 // لأن القيم "o" (الافتتاح) غير مستخدمة فعلياً في أي من دوال التحليل (ATR/ADX/Bollinger/Pivots تعتمد h/l/c فقط)
+// ⚠️ كل استدعاء هنا = 3 طلبات HTTP فعلية (max + min + avg) — والنسخة المجانية من Gold-API تسمح بـ 10 طلبات/ساعة فقط،
+// أي ما يعادل ~3 تحليلات كاملة في الساعة. نخزّن توقيت أي 429 محلياً لتجنّب إهدار ما تبقى من الحصة بمحاولات فاشلة متكررة.
+function goldpx_getGaRateLimitUntil(){
+  try{ return parseInt(localStorage.getItem('goldpx_ga_ratelimit_until')||'0',10) || 0; }catch(e){ return 0; }
+}
+function goldpx_setGaRateLimitUntil(ts){
+  try{ localStorage.setItem('goldpx_ga_ratelimit_until', String(ts)); }catch(e){}
+}
 async function goldpx_fetchGoldApiHistory(metal, ms){
   ms = ms || 9000;
   const key = goldpx_getGaKey();
   if(!key) throw new Error('no gold-api key');
+  const rlUntil = goldpx_getGaRateLimitUntil();
+  if(rlUntil && Date.now() < rlUntil){
+    const mins = Math.ceil((rlUntil - Date.now())/60000);
+    GOLDPX.lastGaError = 'HTTP 429 — تجاوزت الحد المسموح (10 طلبات/ساعة، كل تحليل = 3 طلبات)؛ يتبقى تقريباً '+mins+' دقيقة';
+    throw new Error(GOLDPX.lastGaError);
+  }
   const symbol = metal === 'gold' ? 'XAU' : 'XAG';
   const end = Math.floor(Date.now()/1000);
   const start = end - 400*24*60*60;
@@ -3041,7 +3055,12 @@ async function goldpx_fetchGoldApiHistory(metal, ms){
   }catch(e){
     clearTimeout(to);
     // 🩺 نخزّن سبب الفشل الحقيقي لعرضه للمستخدم بدل رسالة عامة غير مفيدة
-    GOLDPX.lastGaError = (e && e.message) ? String(e.message) : String(e);
+    let msg = (e && e.message) ? String(e.message) : String(e);
+    if(/HTTP 429/.test(msg)){
+      goldpx_setGaRateLimitUntil(Date.now() + 60*60*1000);
+      msg = 'HTTP 429 — تجاوزت الحد المسموح (10 طلبات/ساعة، كل تحليل = 3 طلبات)؛ جرّب بعد ساعة تقريباً';
+    }
+    GOLDPX.lastGaError = msg;
     throw e;
   }
 }
@@ -3131,19 +3150,20 @@ async function goldpx_fetchOHLC(metal){
   d = await goldpx_tryStep([() => goldpx_fetchEdge(metal)]);
   if(d){ goldpx_saveOHLC(metal, d); return d; }
 
-  // 2) Gold-API.com — نفس مصدر السعر الحي الذي يعمل فعلياً — إن توفر مفتاح
-  const _gaKey=goldpx_getGaKey();
-  if(_gaKey){
-    d = await goldpx_tryStep([() => goldpx_fetchGoldApiHistory(metal, 9000)]);
-    if(d){ goldpx_saveOHLC(metal, d); return d; }
-  }
-
-  // 3) Twelve Data — إن توفر مفتاح
+  // 2) Twelve Data — إن توفر مفتاح (حصتها المجانية أسخى بكثير: ~800 طلب/يوم مقابل 10 طلبات/ساعة فقط
+  // لـ Gold-API، لذا صارت الأولوية الآن لها؛ قُدّمت على Gold-API بعد أن تبيّن أن حصة الأخيرة لا تكفي للاستخدام العادي)
   const _key=goldpx_getKey();
   if(_key){
     const tdSym=metal==='gold'?'XAU/USD':'XAG/USD';
     const tdUrl='https://api.twelvedata.com/time_series?symbol='+encodeURIComponent(tdSym)+'&interval=1day&outputsize=400&apikey='+encodeURIComponent(_key);
     d = await goldpx_tryStep([() => goldpx_fetchTO(tdUrl,9000).then(goldpx_parseTwelve)]);
+    if(d){ goldpx_saveOHLC(metal, d); return d; }
+  }
+
+  // 3) Gold-API.com — احتياطي فقط إن لم تتوفر Twelve Data (حصته محدودة جداً: 10 طلبات/ساعة = 3 تحليلات فقط)
+  const _gaKey=goldpx_getGaKey();
+  if(_gaKey){
+    d = await goldpx_tryStep([() => goldpx_fetchGoldApiHistory(metal, 9000)]);
     if(d){ goldpx_saveOHLC(metal, d); return d; }
   }
 
