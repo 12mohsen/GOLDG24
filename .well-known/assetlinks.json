@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.mohsen.goldwallet",
+      "sha256_cert_fingerprints": [
+        "E7:F9:A7:22:33:15:13:66:C2:D0:BD:CC:47:05:7B:0F:33:BD:6C:53:67:4E:17:02:DF:82:4F:DD:18:AB:6C:E1"
+      ]
+    }
+  }
+]
