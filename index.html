@@ -1375,13 +1375,17 @@ async function goldBio_confirmRegister(){
       showErr(err,'كلمة المرور غير صحيحة'); return;
     }
     const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const userId = crypto.getRandomValues(new Uint8Array(16));
+    // 🔑 معرّف ثابت مشتق من اسم المستخدم (وليس عشوائياً) — ضروري لإنشاء "مفتاح مرور" قابل للاكتشاف
+    // (discoverable credential) حتى يقدر جهاز أندرويد يجده عند تسجيل الدخول بدون الحاجة لمطابقة ID صريح
+    const userId = new TextEncoder().encode(user).slice(0, 64);
     const cred = await navigator.credentials.create({ publicKey: {
       challenge: challenge,
       rp: { name: 'محفظة المعادن' },
       user: { id: userId, name: user, displayName: user },
       pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
-      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required' },
+      // residentKey:'required' يجعله "مفتاح مرور" (passkey) مخزّن على الجهاز نفسه (Google Password Manager) —
+      // هذا ما يدعمه جسر WebView فعلياً؛ بدونه فشل تسجيل الدخول بـ NotAllowedError رغم نجاح التفعيل
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'required' },
       timeout: 60000,
       attestation: 'none'
     }});
@@ -1408,9 +1412,10 @@ async function goldBio_loginWithFingerprint(){
   if (!credId || !user || !pass) { alert('البصمة غير مفعّلة على هذا الجهاز بعد — سجّل دخولك يدوياً أولاً وفعّلها من الإعدادات'); return; }
   try{
     const challenge = crypto.getRandomValues(new Uint8Array(32));
+    // بدون allowCredentials عمداً: بما إن التسجيل صار كـ "مفتاح مرور" قابل للاكتشاف (passkey)،
+    // الجهاز يلقاه تلقائياً عبر البصمة بدون حاجة لمطابقة ID صريح — وهذا هو المسار الذي يدعمه WebView فعلياً
     const assertion = await navigator.credentials.get({ publicKey: {
       challenge: challenge,
-      allowCredentials: [{ id: goldBio_bufFromB64url(credId), type:'public-key', transports:['internal'] }],
       userVerification: 'required',
       timeout: 60000
     }});
