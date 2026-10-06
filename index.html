@@ -301,6 +301,7 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
       <div class="auth-err" id="loginErr"></div>
       <button class="btn btn-gold" onclick="doLogin()">دخول</button>
+      <button class="btn btn-outline" id="bioLoginBtn" onclick="goldBio_loginWithFingerprint()" style="display:none;margin-top:8px;">👆 تسجيل الدخول بالبصمة</button>
       <button class="btn btn-outline" onclick="showHint()">🔑 نسيت كلمة المرور؟</button>
       <div class="hint-box" id="hintBox">
         <b>تلميح كلمة المرور:</b> <span id="hintText"></span>
@@ -823,6 +824,24 @@ input:checked+.slider:before{transform:translateX(-20px);background:#000;}
       </div>
       <label class="toggle"><input type="checkbox" id="darkToggle" onchange="toggleTheme()"><span class="slider"></span></label>
     </div>
+    <div class="setting-row" id="bioSettingRow" style="display:none;">
+      <div>
+        <div class="setting-label">تسجيل الدخول بالبصمة</div>
+        <div class="setting-sub" id="bioSettingSub">دخول سريع عبر بصمة هذا الجهاز بدل كتابة كلمة المرور</div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="bioToggle" onchange="goldBio_onToggle(this.checked)"><span class="slider"></span></label>
+    </div>
+    <div id="bioConfirmBox" style="display:none;flex-direction:column;gap:10px;padding:12px 0;border-bottom:1px solid var(--border2);">
+      <div class="inp-group">
+        <label>أدخل كلمة المرور الحالية لتفعيل البصمة</label>
+        <input type="password" id="bioConfirmPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')goldBio_confirmRegister()">
+      </div>
+      <div class="auth-err" id="bioConfirmErr" style="display:none;"></div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-outline" onclick="goldBio_cancelRegister()">إلغاء</button>
+        <button class="btn btn-gold" onclick="goldBio_confirmRegister()">تفعيل</button>
+      </div>
+    </div>
     <div class="setting-row">
       <div>
         <div class="setting-label">تغيير كلمة المرور</div>
@@ -1278,6 +1297,132 @@ function confirmLogout() {
   gold_gold_resetState();
   closeLogoutModal();
   enterGuestMode();
+}
+
+// ══════════════════════════════════════════
+//  تسجيل الدخول بالبصمة — WebAuthn (بصمة/وجه الجهاز نفسه)
+//  ملاحظة: هذا "قفل جهاز" محلي فقط (لا يوجد سيرفر مصادقة FIDO خاص بنا) —
+//  نجاح فحص البصمة يسمح فقط باستخدام اسم المستخدم وكلمة المرور المحفوظين محلياً
+//  لإتمام تسجيل الدخول العادي عبر Supabase تلقائياً، بدل كتابتهما يدوياً كل مرة.
+// ══════════════════════════════════════════
+function goldBio_b64urlFromBuf(buf){
+  const bytes = new Uint8Array(buf);
+  let s = ''; for (let i=0;i<bytes.length;i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function goldBio_bufFromB64url(str){
+  str = str.replace(/-/g,'+').replace(/_/g,'/');
+  while (str.length % 4) str += '=';
+  const bin = atob(str);
+  const bytes = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+async function goldBio_isAvailable(){
+  try{
+    if (!window.PublicKeyCredential || !navigator.credentials) return false;
+    if (PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
+      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    }
+    return true;
+  }catch(e){ return false; }
+}
+function goldBio_isEnabled(){
+  try{ return localStorage.getItem('goldBio_enabled')==='true' && !!localStorage.getItem('goldBio_credId'); }catch(e){ return false; }
+}
+// يُستدعى عند تحميل الصفحة لإظهار/إخفاء زر البصمة في شاشة الدخول وصف الإعدادات حسب دعم الجهاز
+async function goldBio_refreshUI(){
+  const available = await goldBio_isAvailable();
+  const enabled = goldBio_isEnabled();
+  const loginBtn = document.getElementById('bioLoginBtn');
+  if (loginBtn) loginBtn.style.display = (available && enabled) ? 'block' : 'none';
+  const row = document.getElementById('bioSettingRow');
+  if (row) row.style.display = available ? 'flex' : 'none';
+  const toggle = document.getElementById('bioToggle');
+  if (toggle) toggle.checked = enabled;
+  const sub = document.getElementById('bioSettingSub');
+  if (sub) sub.textContent = enabled ? '✅ مُفعّلة على هذا الجهاز' : 'دخول سريع عبر بصمة هذا الجهاز بدل كتابة كلمة المرور';
+}
+// المستخدم بدّل مفتاح التفعيل في الإعدادات
+function goldBio_onToggle(turnOn){
+  if (turnOn) {
+    document.getElementById('bioConfirmBox').style.display = 'flex';
+    document.getElementById('bioConfirmPass').value = '';
+    document.getElementById('bioConfirmErr').style.display = 'none';
+    document.getElementById('bioConfirmPass').focus();
+  } else {
+    try{
+      localStorage.removeItem('goldBio_credId');
+      localStorage.removeItem('goldBio_enabled');
+    }catch(e){}
+    goldBio_refreshUI();
+  }
+}
+function goldBio_cancelRegister(){
+  document.getElementById('bioConfirmBox').style.display = 'none';
+  goldBio_refreshUI(); // يرجع المفتاح لحالته الحقيقية (غير مفعّل)
+}
+// تأكيد كلمة المرور الحالية ثم تسجيل بصمة الجهاز عبر WebAuthn
+async function goldBio_confirmRegister(){
+  const user = gold_gold_state.currentUser;
+  const pass = document.getElementById('bioConfirmPass').value;
+  const err = document.getElementById('bioConfirmErr');
+  if (!user) { showErr(err,'يجب تسجيل الدخول أولاً'); return; }
+  if (!pass) { showErr(err,'أدخل كلمة المرور'); return; }
+  try{
+    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
+    if (!accounts || accounts.length===0 || accounts[0].pass_hash !== btoa(pass)) {
+      showErr(err,'كلمة المرور غير صحيحة'); return;
+    }
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const userId = crypto.getRandomValues(new Uint8Array(16));
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: challenge,
+      rp: { name: 'محفظة المعادن' },
+      user: { id: userId, name: user, displayName: user },
+      pubKeyCredParams: [{type:'public-key',alg:-7},{type:'public-key',alg:-257}],
+      authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required' },
+      timeout: 60000,
+      attestation: 'none'
+    }});
+    if (!cred) throw new Error('no credential');
+    localStorage.setItem('goldBio_credId', goldBio_b64urlFromBuf(cred.rawId));
+    localStorage.setItem('goldBio_enabled', 'true');
+    // لازم تُحفظ بيانات الدخول محلياً كي يستخدمها زر البصمة لاحقاً لإكمال الدخول تلقائياً
+    localStorage.setItem('savedUsername', user);
+    localStorage.setItem('savedPassword', pass);
+    document.getElementById('bioConfirmBox').style.display = 'none';
+    goldBio_refreshUI();
+    alert('✅ تم تفعيل تسجيل الدخول بالبصمة على هذا الجهاز');
+  }catch(e){
+    console.error('biometric register error:', e);
+    showErr(err, 'تعذّر تفعيل البصمة على هذا الجهاز' + (e && e.message ? (' ('+e.message+')') : ''));
+    document.getElementById('bioToggle').checked = false;
+  }
+}
+// زر "تسجيل الدخول بالبصمة" في شاشة الدخول
+async function goldBio_loginWithFingerprint(){
+  const credId = localStorage.getItem('goldBio_credId');
+  const user = localStorage.getItem('savedUsername');
+  const pass = localStorage.getItem('savedPassword');
+  if (!credId || !user || !pass) { alert('البصمة غير مفعّلة على هذا الجهاز بعد — سجّل دخولك يدوياً أولاً وفعّلها من الإعدادات'); return; }
+  try{
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge: challenge,
+      allowCredentials: [{ id: goldBio_bufFromB64url(credId), type:'public-key', transports:['internal'] }],
+      userVerification: 'required',
+      timeout: 60000
+    }});
+    if (!assertion) throw new Error('no assertion');
+    document.getElementById('loginUser').value = user;
+    document.getElementById('loginPass').value = pass;
+    await doLogin();
+  }catch(e){
+    console.error('biometric login error:', e);
+    const err = document.getElementById('loginErr');
+    showErr(err, 'تعذّر التحقق من البصمة، جرّب تسجيل الدخول بكلمة المرور');
+  }
 }
 
 function enterApp() {
@@ -2725,7 +2870,7 @@ function showOnChart(metal) {
 // ═══════════════════════════════════════════
 //  SETTINGS
 // ═══════════════════════════════════════════
-function openSettings() { if (!requireAuth()) return; document.getElementById('settingsModal').classList.add('open'); }
+function openSettings() { if (!requireAuth()) return; document.getElementById('settingsModal').classList.add('open'); goldBio_refreshUI(); }
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 
 // ═══════════════════════════════════════════
@@ -2815,6 +2960,7 @@ const savedUsername = localStorage.getItem('savedUsername');
 const savedPassword = localStorage.getItem('savedPassword');
 if (savedUsername) document.getElementById('loginUser').value = savedUsername;
 if (savedPassword) document.getElementById('loginPass').value = savedPassword;
+goldBio_refreshUI();
 
 const session = sessionStorage.getItem('currentUser');
 if (session) {
