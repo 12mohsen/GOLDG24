@@ -1421,7 +1421,12 @@ async function goldBio_loginWithFingerprint(){
   }catch(e){
     console.error('biometric login error:', e);
     const err = document.getElementById('loginErr');
-    showErr(err, 'تعذّر التحقق من البصمة، جرّب تسجيل الدخول بكلمة المرور');
+    // 🩺 نعرض السبب الحقيقي (اسم الخطأ + رسالته) بدل رسالة عامة، لتشخيص المشكلة بدقة
+    const reason = (e && (e.name || e.message)) ? (' ('+(e.name||'')+(e.message?': '+e.message:'')+')') : '';
+    // عرض أطول من المعتاد (10 ثوانٍ بدل 3) حتى يتسنى أخذ لقطة شاشة للسبب الحقيقي
+    err.textContent = 'تعذّر التحقق من البصمة'+reason;
+    err.style.display = 'block';
+    setTimeout(() => err.style.display='none', 10000);
   }
 }
 
