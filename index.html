@@ -1410,6 +1410,11 @@ async function goldBio_loginWithFingerprint(){
   const user = localStorage.getItem('savedUsername');
   const pass = localStorage.getItem('savedPassword');
   if (!credId || !user || !pass) { alert('البصمة غير مفعّلة على هذا الجهاز بعد — سجّل دخولك يدوياً أولاً وفعّلها من الإعدادات'); return; }
+  // 🔄 تغذية راجعة فورية عند الضغط (قبل ما تظهر نافذة البصمة من أندرويد نفسها، وأثناء تحميل البيانات بعدها) —
+  // بدونها تحس إن الضغطة "ثقيلة"/بدون استجابة رغم إنها تشتغل، لأن ما فيه أي مؤشر تحميل طول هذي الفترة
+  const btn = document.getElementById('bioLoginBtn');
+  const btnOrigText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جارٍ التحقق من البصمة...'; }
   try{
     const challenge = crypto.getRandomValues(new Uint8Array(32));
     // بدون allowCredentials عمداً: بما إن التسجيل صار كـ "مفتاح مرور" قابل للاكتشاف (passkey)،
@@ -1420,6 +1425,7 @@ async function goldBio_loginWithFingerprint(){
       timeout: 60000
     }});
     if (!assertion) throw new Error('no assertion');
+    if (btn) btn.textContent = '⏳ جارٍ تسجيل الدخول...';
     document.getElementById('loginUser').value = user;
     document.getElementById('loginPass').value = pass;
     await doLogin();
@@ -1432,6 +1438,8 @@ async function goldBio_loginWithFingerprint(){
     err.textContent = 'تعذّر التحقق من البصمة'+reason;
     err.style.display = 'block';
     setTimeout(() => err.style.display='none', 10000);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btnOrigText; }
   }
 }
 
