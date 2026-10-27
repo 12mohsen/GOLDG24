@@ -957,6 +957,46 @@ console.log('✅ Supabase REST API ready');
 const APP_ORIGIN = 'gold_wallet';
 
 // ═══════════════════════════════════════════
+//  طبقة الأمان: كل التحقق يتم على السيرفر عبر دوال RPC
+//  المتصفح لا يرى أي hash ولا يصل لأي جدول حساس مباشرة
+// ═══════════════════════════════════════════
+let GOLD_TOKEN = localStorage.getItem('gold_token') || null;
+
+function goldSetToken(t) {
+  GOLD_TOKEN = t;
+  if (t) localStorage.setItem('gold_token', t);
+  else localStorage.removeItem('gold_token');
+}
+
+async function sbRpc(fn, args) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { ...SB_HEADERS, 'Content-Type': 'application/json' },
+    body: JSON.stringify(args || {})
+  });
+  const txt = await res.text();
+  if (!res.ok) {
+    let code = '';
+    try { code = (JSON.parse(txt).message || '').trim(); } catch(e) { code = txt; }
+    const e = new Error(code); e.code = code; throw e;
+  }
+  return txt ? JSON.parse(txt) : null;
+}
+
+const GOLD_ERRORS = {
+  bad_credentials:   'اسم المستخدم أو كلمة المرور غير صحيحة',
+  too_many_attempts: 'محاولات كثيرة خاطئة — انتظر ١٥ دقيقة ثم حاول مجدداً',
+  username_taken:    'اسم المستخدم محجوز',
+  username_too_short:'اسم المستخدم يجب أن يكون ٣ أحرف على الأقل',
+  password_too_short:'كلمة المرور يجب أن تكون ٦ أحرف على الأقل',
+  wrong_old_password:'كلمة المرور الحالية غير صحيحة',
+  invalid_session:   'انتهت الجلسة — سجّل الدخول من جديد'
+};
+function goldErrMsg(e) {
+  return GOLD_ERRORS[e && e.code] || 'حدث خطأ في الاتصال، حاول مرة أخرى';
+}
+
+// ═══════════════════════════════════════════
 //  GOLD STATE & STORAGE — حالة التطبيق
 // ═══════════════════════════════════════════
 let gold_gold_state = {
@@ -1047,15 +1087,15 @@ function gold_gold_saveSettings() {
     serviceFeeRate: gold_gold_state.serviceFeeRate
   }));
   // حفظ Supabase
-  sbUpsert('settings', {
-    user_id: gold_gold_state.currentUser,
-    exchange_rate: gold_gold_state.exchangeRate,
-    dark_mode: gold_gold_state.darkMode,
-    spread_bank: gold_gold_state.spreadBank,
-    spread_value: gold_gold_state.spreadValue,
-    spread_silver: gold_gold_state.spreadSilver,
-    storage_fees: gold_gold_state.storageFees,
-    service_fee_rate: gold_gold_state.serviceFeeRate
+  sbRpc('gold_save_settings', {
+    p_token: GOLD_TOKEN,
+    p_exchange_rate: gold_gold_state.exchangeRate,
+    p_dark_mode: gold_gold_state.darkMode,
+    p_spread_bank: gold_gold_state.spreadBank,
+    p_spread_value: gold_gold_state.spreadValue,
+    p_spread_silver: gold_gold_state.spreadSilver,
+    p_storage_fees: gold_gold_state.storageFees,
+    p_service_fee_rate: gold_gold_state.serviceFeeRate
   }).catch(e => console.error('❌ save settings:', e));
 }
 
@@ -1063,24 +1103,15 @@ function gold_gold_saveSettings() {
 // silent = true يمنع ظهور alert (يُستخدم أثناء النقل الجماعي من localStorage)
 async function gold_gold_sbAddOperation(op, silent = false) {
   try {
-    const body = {
-      user_id: gold_gold_state.currentUser,
-      metal: op.metal,
-      grams: op.grams,
-      buy_price: op.buyPrice,
-      type: op.type,
-      date: op.date
-    };
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/gold_operations`, {
-      method: 'POST',
-      headers: {...SB_HEADERS, 'Prefer': 'return=representation'},
-      body: JSON.stringify(body)
+    const newId = await sbRpc('gold_add_operation', {
+      p_token: GOLD_TOKEN,
+      p_metal: op.metal,
+      p_grams: op.grams,
+      p_buy_price: op.buyPrice,
+      p_type: op.type,
+      p_date: op.date
     });
-    if (!res.ok) throw new Error(await res.text());
-    const rows = await res.json();
-    if (rows && rows.length > 0 && rows[0].id) {
-      op.supabaseId = rows[0].id;
-    }
+    if (newId) op.supabaseId = newId;
     console.log('\u2705 \u0639\u0645\u0644\u064a\u0629 \u0645\u062d\u0641\u0648\u0638\u0629 \u0641\u064a Supabase | id:', op.supabaseId || 'N/A');
     return true;
   } catch (e) {
@@ -1093,13 +1124,8 @@ async function gold_gold_sbAddOperation(op, silent = false) {
 // حذف عملية واحدة من Supabase — بالـ UUID إن وُجد (Primary Key)
 async function gold_gold_sbRemoveOperation(op) {
   try {
-    let q;
-    if (op.supabaseId) {
-      q = `id=eq.${op.supabaseId}`;
-    } else {
-      q = `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}&metal=eq.${op.metal}&grams=eq.${op.grams}&buy_price=eq.${op.buyPrice}&date=eq.${encodeURIComponent(op.date)}`;
-    }
-    await sbDelete('gold_operations', q);
+    if (!op.supabaseId) { console.warn('لا يوجد معرّف للعملية — تم تخطي الحذف من السيرفر'); return; }
+    await sbRpc('gold_delete_operation', { p_token: GOLD_TOKEN, p_id: op.supabaseId });
     console.log('\u2705 \u0639\u0645\u0644\u064a\u0629 \u0645\u062d\u0630\u0648\u0641\u0629 | id:', op.supabaseId || 'fallback-match');
   } catch (e) {
     console.error('\u274c \u0641\u0634\u0644 \u062d\u0630\u0641 \u0627\u0644\u0639\u0645\u0644\u064a\u0629:', e);
@@ -1108,14 +1134,16 @@ async function gold_gold_sbRemoveOperation(op) {
 
 // تحميل كل البيانات من Supabase
 async function gold_gold_loadFromSupabase() {
-  if (!gold_gold_state.currentUser) return;
+  // الرمز هو مصدر الهوية الآن — اسم المستخدم يأتي من السيرفر ضمن gold_load
+  if (!GOLD_TOKEN) return;
   gold_gold_resetState();
 
   try {
-    // 1) تحميل الإعدادات
-    const settings = await sbGet('settings', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`);
-    if (settings && settings.length > 0) {
-      const s = settings[0];
+    // 1) تحميل كل شيء بنداء واحد محمي بالرمز
+    const payload = await sbRpc('gold_load', { p_token: GOLD_TOKEN });
+    if (payload && payload.user) gold_gold_state.currentUser = payload.user;
+    if (payload && payload.settings) {
+      const s = payload.settings;
       gold_gold_state.exchangeRate = s.exchange_rate || 3.75;
       gold_gold_state.darkMode = s.dark_mode !== undefined ? s.dark_mode : true;
       gold_gold_state.spreadBank = s.spread_bank || 'alahli';
@@ -1125,9 +1153,9 @@ async function gold_gold_loadFromSupabase() {
       gold_gold_state.serviceFeeRate = s.service_fee_rate !== undefined ? s.service_fee_rate : 10;
     }
 
-    // 2) تحميل العمليات
-    const ops = await sbGet('gold_operations', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}&order=created_at.asc`);
-    if (ops && ops.length > 0) {
+    // 2) العمليات (جاءت ضمن نفس النداء)
+    const ops = (payload && payload.operations) || [];
+    if (ops.length > 0) {
       gold_gold_state.operations = ops.map((op, i) => ({
         id: i + 1,
         supabaseId: op.id,
@@ -1200,10 +1228,8 @@ async function doLogin() {
   const err = document.getElementById('loginErr');
   if (!user || !pass) { showErr(err,'يرجى ملء جميع الحقول'); return; }
   try {
-    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
-    if (!accounts || accounts.length === 0) { showErr(err,'اسم المستخدم غير موجود'); return; }
-    if (accounts[0].created_from !== APP_ORIGIN) { showErr(err,'هذا الحساب غير مسجل في محفظة الذهب'); return; }
-    if (accounts[0].pass_hash !== btoa(pass)) { showErr(err,'كلمة المرور غير صحيحة'); return; }
+    const token = await sbRpc('gold_login', { p_user: user, p_pass: pass });
+    goldSetToken(token);
     err.style.display = 'none';
     gold_gold_state.currentUser = user;
     // ✅ تذكّر اسم المستخدم دائماً عند أي تسجيل دخول ناجح (بغض النظر عن خيار "حفظ البيانات" عند الخروج)
@@ -1213,7 +1239,7 @@ async function doLogin() {
     enterApp();
   } catch (e) {
     console.error('Login error:', e);
-    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+    showErr(err, goldErrMsg(e));
   }
 }
 
@@ -1224,29 +1250,19 @@ async function doRegister() {
   const hint = document.getElementById('regHint').value.trim();
   const err = document.getElementById('regErr');
   if (!user || !pass) { showErr(err,'يرجى ملء الحقول المطلوبة'); return; }
-  if (pass.length < 4) { showErr(err,'كلمة المرور يجب أن تكون 4 أحرف على الأقل'); return; }
+  if (pass.length < 6) { showErr(err,'كلمة المرور يجب أن تكون ٦ أحرف على الأقل'); return; }
   if (pass !== pass2) { showErr(err,'كلمتا المرور غير متطابقتان'); return; }
   try {
-    // التحقق من تكرار اسم المستخدم في Supabase
-    const existing = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}&created_from=eq.${APP_ORIGIN}`);
-    if (existing && existing.length > 0) {
-      showErr(err,'هذا الاسم محجوز في محفظة الذهب');
-      return;
-    }
-    // إنشاء الحساب في Supabase
-    await sbPost('users', {
-      user_id: user,
-      pass_hash: btoa(pass),
-      hint: hint || 'لا يوجد تلميح',
-      created_from: APP_ORIGIN
-    });
+    // إنشاء الحساب على السيرفر (يتحقق من التكرار ويشفّر بـ bcrypt)
+    const token = await sbRpc('gold_register', { p_user: user, p_pass: pass, p_hint: hint || null });
+    goldSetToken(token);
     err.style.display = 'none';
     alert('✅ تم إنشاء الحساب بنجاح! يمكنك الدخول الآن.');
     switchTab('login');
     document.getElementById('loginUser').value = user;
   } catch (e) {
     console.error('Register error:', e);
-    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+    showErr(err, goldErrMsg(e));
   }
 }
 
@@ -1255,9 +1271,9 @@ async function showHint() {
   const hintBox = document.getElementById('hintBox');
   if (!user) { hintBox.style.display = 'block'; document.getElementById('hintText').textContent = 'أدخل اسم المستخدم أولاً'; return; }
   try {
-    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
+    const hint = await sbRpc('gold_hint', { p_user: user });
     hintBox.style.display = 'block';
-    document.getElementById('hintText').textContent = (accounts && accounts.length > 0) ? accounts[0].hint : 'اسم المستخدم غير موجود';
+    document.getElementById('hintText').textContent = hint || 'لا يوجد تلميح محفوظ';
   } catch (e) {
     hintBox.style.display = 'block';
     document.getElementById('hintText').textContent = 'خطأ في الاتصال';
@@ -1278,20 +1294,20 @@ function closeLogoutModal() {
   document.getElementById('logoutModal').classList.remove('open');
 }
 
-function confirmLogout() {
+async function confirmLogout() {
   const saveData = document.getElementById('saveDataCheckbox').checked;
+  const keepBio = localStorage.getItem('goldBio_enabled') === 'true';
   if (saveData) {
     gold_gold_saveState();
-    // حفظ اسم المستخدم وكلمة المرور في حقول تسجيل الدخول
     const user = gold_gold_state.currentUser;
-    const pass = document.getElementById('loginPass').value;
     if (user) localStorage.setItem('savedUsername', user);
-    if (pass) localStorage.setItem('savedPassword', pass);
-  } else {
-    // مسح كلمة المرور المحفوظة فقط (بيانات حساسة) — لكن نُبقي اسم المستخدم محفوظاً
-    // كتذكّر بسيط وغير حساس، حتى لا يُطلب إدخاله يدوياً كل مرة
-    localStorage.removeItem('savedPassword');
   }
+  // إبطال الجلسة على السيرفر، إلا إذا كانت البصمة مفعّلة على هذا الجهاز
+  if (!keepBio) {
+    try { await sbRpc('gold_logout', { p_token: GOLD_TOKEN }); } catch(e) {}
+    goldSetToken(null);
+  }
+  sessionStorage.removeItem('currentUser');
   // تصفير كامل للبيانات عند الخروج لمنع تسرب بيانات لمستخدم آخر
   gold_gold_state.currentUser = null;
   gold_gold_resetState();
@@ -1370,10 +1386,8 @@ async function goldBio_confirmRegister(){
   if (!user) { showErr(err,'يجب تسجيل الدخول أولاً'); return; }
   if (!pass) { showErr(err,'أدخل كلمة المرور'); return; }
   try{
-    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(user)}`);
-    if (!accounts || accounts.length===0 || accounts[0].pass_hash !== btoa(pass)) {
-      showErr(err,'كلمة المرور غير صحيحة'); return;
-    }
+    const ok = await sbRpc('gold_verify', { p_token: GOLD_TOKEN, p_pass: pass });
+    if (!ok) { showErr(err,'كلمة المرور غير صحيحة'); return; }
     const challenge = crypto.getRandomValues(new Uint8Array(32));
     // 🔑 معرّف ثابت مشتق من اسم المستخدم (وليس عشوائياً) — ضروري لإنشاء "مفتاح مرور" قابل للاكتشاف
     // (discoverable credential) حتى يقدر جهاز أندرويد يجده عند تسجيل الدخول بدون الحاجة لمطابقة ID صريح
@@ -1394,7 +1408,7 @@ async function goldBio_confirmRegister(){
     localStorage.setItem('goldBio_enabled', 'true');
     // لازم تُحفظ بيانات الدخول محلياً كي يستخدمها زر البصمة لاحقاً لإكمال الدخول تلقائياً
     localStorage.setItem('savedUsername', user);
-    localStorage.setItem('savedPassword', pass);
+    // ملاحظة أمنية: لا نحفظ كلمة المرور إطلاقاً — الرمز (gold_token) وحده يكفي للبصمة
     document.getElementById('bioConfirmBox').style.display = 'none';
     goldBio_refreshUI();
     alert('✅ تم تفعيل تسجيل الدخول بالبصمة على هذا الجهاز');
@@ -1408,8 +1422,7 @@ async function goldBio_confirmRegister(){
 async function goldBio_loginWithFingerprint(){
   const credId = localStorage.getItem('goldBio_credId');
   const user = localStorage.getItem('savedUsername');
-  const pass = localStorage.getItem('savedPassword');
-  if (!credId || !user || !pass) { alert('البصمة غير مفعّلة على هذا الجهاز بعد — سجّل دخولك يدوياً أولاً وفعّلها من الإعدادات'); return; }
+  if (!credId || !user || !GOLD_TOKEN) { alert('البصمة غير مفعّلة على هذا الجهاز بعد — سجّل دخولك يدوياً أولاً وفعّلها من الإعدادات'); return; }
   // 🔄 تغذية راجعة فورية عند الضغط (قبل ما تظهر نافذة البصمة من أندرويد نفسها، وأثناء تحميل البيانات بعدها) —
   // بدونها تحس إن الضغطة "ثقيلة"/بدون استجابة رغم إنها تشتغل، لأن ما فيه أي مؤشر تحميل طول هذي الفترة
   const btn = document.getElementById('bioLoginBtn');
@@ -1426,9 +1439,10 @@ async function goldBio_loginWithFingerprint(){
     }});
     if (!assertion) throw new Error('no assertion');
     if (btn) btn.textContent = '⏳ جارٍ تسجيل الدخول...';
-    document.getElementById('loginUser').value = user;
-    document.getElementById('loginPass').value = pass;
-    await doLogin();
+    // البصمة تُثبت هوية صاحب الجهاز، والرمز المحفوظ يكمل الدخول — بلا كلمة مرور مخزّنة
+    gold_gold_state.currentUser = user;
+    await gold_gold_loadFromSupabase();
+    enterApp();
   }catch(e){
     console.error('biometric login error:', e);
     const err = document.getElementById('loginErr');
@@ -1472,29 +1486,24 @@ async function changePassword() {
   const nw = document.getElementById('newPass').value;
   const nw2 = document.getElementById('newPass2').value;
   const err = document.getElementById('passErr');
+  if (nw.length < 6) { showErr(err,'كلمة المرور الجديدة يجب أن تكون ٦ أحرف على الأقل'); return; }
+  if (nw !== nw2) { showErr(err,'كلمتا المرور الجديدتان غير متطابقتين'); return; }
   try {
-    const accounts = await sbGet('users', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`);
-    if (!accounts || accounts.length === 0 || accounts[0].pass_hash !== btoa(old)) {
-      showErr(err,'كلمة المرور الحالية غير صحيحة'); return;
-    }
-    if (nw.length < 4) { showErr(err,'كلمة المرور الجديدة قصيرة جداً'); return; }
-    if (nw !== nw2) { showErr(err,'كلمتا المرور الجديدتان غير متطابقتين'); return; }
-    // تحديث كلمة المرور في Supabase
-    await sbPatch('users', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`, { pass_hash: btoa(nw) });
-    alert('✅ تم تغيير كلمة المرور بنجاح!');
+    await sbRpc('gold_change_password', { p_token: GOLD_TOKEN, p_old: old, p_new: nw });
+    alert('✅ تم تغيير كلمة المرور بنجاح! (تم إنهاء الجلسات على الأجهزة الأخرى)');
     document.getElementById('oldPass').value = '';
     document.getElementById('newPass').value = '';
     document.getElementById('newPass2').value = '';
   } catch (e) {
     console.error('Change password error:', e);
-    showErr(err,'حدث خطأ في الاتصال، حاول مرة أخرى');
+    showErr(err, goldErrMsg(e));
   }
 }
 
 async function clearAllData() {
   if (!confirm('⚠️ سيتم حذف جميع بيانات المحفظة. هل أنت متأكد؟')) return;
   gold_gold_state.operations = [];
-  try { await sbDelete('gold_operations', `user_id=eq.${encodeURIComponent(gold_gold_state.currentUser)}`); } catch(e) {}
+  try { await sbRpc('gold_delete_all_operations', { p_token: GOLD_TOKEN }); } catch(e) { console.error(e); }
   gold_gold_saveSettings();
   gold_gold_renderHoldings();
   gold_gold_recalcAll();
@@ -2975,15 +2984,17 @@ document.getElementById('sellMetal').addEventListener('change', updateSpreadDisp
 // Check if already logged in (session)
 // استعادة اسم المستخدم المحفوظ
 const savedUsername = localStorage.getItem('savedUsername');
-const savedPassword = localStorage.getItem('savedPassword');
 if (savedUsername) document.getElementById('loginUser').value = savedUsername;
-if (savedPassword) document.getElementById('loginPass').value = savedPassword;
 goldBio_refreshUI();
 
-const session = sessionStorage.getItem('currentUser');
-if (session) {
-  gold_gold_state.currentUser = session;
-  gold_gold_loadFromSupabase().then(() => enterApp());
+// استعادة الجلسة بالرمز المحفوظ — السيرفر هو من يقرر صلاحيته
+if (GOLD_TOKEN) {
+  gold_gold_loadFromSupabase()
+    .then(() => {
+      if (gold_gold_state.currentUser) enterApp();
+      else { goldSetToken(null); enterGuestMode(); }
+    })
+    .catch(() => { goldSetToken(null); enterGuestMode(); });
 } else {
   // وضع المشاهدة: أظهر التطبيق فوراً بدون تسجيل دخول
   enterGuestMode();
